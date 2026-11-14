@@ -1,0 +1,227 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Shared Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function incoming() {
+      return request.resource.data;
+    }
+    function existing() {
+      return resource.data;
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Validation Blueprint: PlayerSave
+    function isValidPlayerSave(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'coins', 'highScore', 'bestDistance', 'totalRuns',
+          'ownedSkins', 'equippedSkin', 'magnetLevel', 'jetpackLevel',
+          'multiplierLevel', 'hoverboards', 'adFree', 'personalizedAds',
+          'audioSfx', 'audioMusic', 'qualityPreset', 'touchControls',
+          'purchases', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'coins', 'highScore', 'bestDistance', 'totalRuns',
+          'ownedSkins', 'equippedSkin', 'magnetLevel', 'jetpackLevel',
+          'multiplierLevel', 'hoverboards', 'adFree', 'personalizedAds',
+          'audioSfx', 'audioMusic', 'qualityPreset', 'touchControls',
+          'purchases', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && data.ownerId == userId && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.coins is int && data.coins >= 0 && data.coins <= 100000000
+        && data.highScore is int && data.highScore >= 0 && data.highScore <= 100000000
+        && data.bestDistance is int && data.bestDistance >= 0 && data.bestDistance <= 10000000
+        && data.totalRuns is int && data.totalRuns >= 0 && data.totalRuns <= 1000000
+        && data.ownedSkins is list && data.ownedSkins.size() >= 1 && data.ownedSkins.size() <= 12 && data.ownedSkins[0] is string
+        && data.equippedSkin is string && data.equippedSkin.size() >= 1 && data.equippedSkin.size() <= 32 && data.equippedSkin.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.magnetLevel is int && data.magnetLevel >= 1 && data.magnetLevel <= 5
+        && data.jetpackLevel is int && data.jetpackLevel >= 1 && data.jetpackLevel <= 5
+        && data.multiplierLevel is int && data.multiplierLevel >= 1 && data.multiplierLevel <= 5
+        && data.hoverboards is int && data.hoverboards >= 0 && data.hoverboards <= 999
+        && data.adFree is bool
+        && data.personalizedAds is bool
+        && data.audioSfx is bool
+        && data.audioMusic is bool
+        && data.qualityPreset is string && data.qualityPreset.size() <= 10 && data.qualityPreset in ['auto', 'low', 'high']
+        && data.touchControls is bool
+        && data.purchases is list && data.purchases.size() <= 30
+        && (data.purchases.size() == 0 || data.purchases[0] is string)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: PrivateAccountInfo
+    function isValidPrivateAccount(data, userId) {
+      return data.keys().hasAll(['ownerId', 'email', 'privacyConsent', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'email', 'privacyConsent', 'createdAt', 'updatedAt'])
+        && data.ownerId is string && data.ownerId == userId && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.email is string && data.email.size() <= 254
+        && data.privacyConsent is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: LeaderboardEntry (Zero PII)
+    function isValidLeaderboardEntry(data, userId) {
+      return data.keys().hasAll([
+          'userId', 'displayName', 'friendCode', 'equippedSkin',
+          'highScore', 'bestDistance', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'displayName', 'friendCode', 'equippedSkin',
+          'highScore', 'bestDistance', 'isPublic', 'createdAt', 'updatedAt'
+        ])
+        && data.userId is string && data.userId == userId && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 40
+        && data.friendCode is string && data.friendCode.size() >= 6 && data.friendCode.size() <= 12 && data.friendCode.matches('^[A-Z0-9]+$')
+        && data.equippedSkin is string && data.equippedSkin.size() >= 1 && data.equippedSkin.size() <= 32 && data.equippedSkin.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.highScore is int && data.highScore >= 0 && data.highScore <= 100000000
+        && data.bestDistance is int && data.bestDistance >= 0 && data.bestDistance <= 10000000
+        && data.isPublic == true
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: Friendship
+    function isValidFriendship(data) {
+      return data.keys().hasAll([
+          'requesterId', 'targetId', 'requesterName', 'targetName',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'requesterId', 'targetId', 'requesterName', 'targetName',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.requesterId is string && data.requesterId.size() >= 1 && data.requesterId.size() <= 128 && data.requesterId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 && data.targetId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.requesterId != data.targetId
+        && data.requesterName is string && data.requesterName.size() >= 1 && data.requesterName.size() <= 40
+        && data.targetName is string && data.targetName.size() >= 1 && data.targetName.size() <= 40
+        && data.status is string && data.status.size() <= 12 && data.status in ['pending', 'accepted']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // /saves/{userId} - Private Cloud Save
+    match /saves/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow create: if isValidId(userId)
+        && isVerified()
+        && isOwner(userId)
+        && isValidPlayerSave(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isVerified()
+        && isOwner(userId)
+        && isValidPlayerSave(incoming(), userId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'coins', 'highScore', 'bestDistance', 'totalRuns',
+          'ownedSkins', 'equippedSkin', 'magnetLevel', 'jetpackLevel',
+          'multiplierLevel', 'hoverboards', 'adFree', 'personalizedAds',
+          'audioSfx', 'audioMusic', 'qualityPreset', 'touchControls',
+          'purchases', 'updatedAt'
+        ]);
+      allow delete: if isValidId(userId) && isVerified() && isOwner(userId);
+    }
+
+    // /users_private/{userId} - Isolated PII & Consent
+    match /users_private/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow create: if isValidId(userId)
+        && isVerified()
+        && isOwner(userId)
+        && isValidPrivateAccount(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isVerified()
+        && isOwner(userId)
+        && isValidPrivateAccount(incoming(), userId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'email', 'privacyConsent', 'updatedAt'
+        ]);
+      allow delete: if isValidId(userId) && isVerified() && isOwner(userId);
+    }
+
+    // /leaderboard/{userId} - Public High Score Board & Friend Directory
+    match /leaderboard/{userId} {
+      allow get: if isValidId(userId) && resource.data.isPublic == true;
+      allow list: if resource.data.isPublic == true;
+      allow create: if isValidId(userId)
+        && isVerified()
+        && isOwner(userId)
+        && isValidLeaderboardEntry(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isVerified()
+        && isOwner(userId)
+        && isValidLeaderboardEntry(incoming(), userId)
+        && incoming().userId == existing().userId
+        && incoming().friendCode == existing().friendCode
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().highScore >= existing().highScore
+        && incoming().bestDistance >= existing().bestDistance
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'equippedSkin', 'highScore', 'bestDistance', 'updatedAt'
+        ]);
+      allow delete: if isValidId(userId) && isVerified() && isOwner(userId);
+    }
+
+    // /friendships/{friendshipId} - Social Friend Connections
+    match /friendships/{friendshipId} {
+      allow get: if isValidId(friendshipId)
+        && isSignedIn()
+        && (resource.data.requesterId == request.auth.uid || resource.data.targetId == request.auth.uid);
+      allow list: if isSignedIn()
+        && (resource.data.requesterId == request.auth.uid || resource.data.targetId == request.auth.uid);
+      allow create: if isValidId(friendshipId)
+        && isVerified()
+        && isValidFriendship(incoming())
+        && incoming().requesterId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/leaderboard/$(incoming().targetId));
+      allow update: if isValidId(friendshipId)
+        && isVerified()
+        && isValidFriendship(incoming())
+        && incoming().requesterId == existing().requesterId
+        && incoming().targetId == existing().targetId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (existing().targetId == request.auth.uid
+            && existing().status == 'pending'
+            && incoming().status == 'accepted'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
+        );
+      allow delete: if isValidId(friendshipId)
+        && isVerified()
+        && (existing().requesterId == request.auth.uid || existing().targetId == request.auth.uid);
+    }
+  }
+}

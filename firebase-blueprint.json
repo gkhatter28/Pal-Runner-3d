@@ -1,0 +1,297 @@
+{
+  "entities": {
+    "PlayerSave": {
+      "title": "PlayerSave",
+      "description": "Private cloud save state for player currency, unlocked skins, upgrades, and preferences.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the save owner.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "coins": {
+          "type": "integer",
+          "description": "Current coin balance."
+        },
+        "highScore": {
+          "type": "integer",
+          "description": "Best run score achieved by the player."
+        },
+        "bestDistance": {
+          "type": "integer",
+          "description": "Longest run distance in meters."
+        },
+        "totalRuns": {
+          "type": "integer",
+          "description": "Total completed runs."
+        },
+        "ownedSkins": {
+          "type": "array",
+          "description": "Unlocked runner skin IDs (max 12)."
+        },
+        "equippedSkin": {
+          "type": "string",
+          "description": "Currently selected runner skin ID.",
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "magnetLevel": {
+          "type": "integer",
+          "description": "Coin magnet duration upgrade level (1-5)."
+        },
+        "jetpackLevel": {
+          "type": "integer",
+          "description": "Jetpack boost duration upgrade level (1-5)."
+        },
+        "multiplierLevel": {
+          "type": "integer",
+          "description": "Score multiplier upgrade level (1-5)."
+        },
+        "hoverboards": {
+          "type": "integer",
+          "description": "Available hoverboard shield charges."
+        },
+        "adFree": {
+          "type": "boolean",
+          "description": "Whether the player unlocked the Ad-Free Pass."
+        },
+        "personalizedAds": {
+          "type": "boolean",
+          "description": "User consent preference for personalized ad previews."
+        },
+        "audioSfx": {
+          "type": "boolean",
+          "description": "Sound effects enabled toggle."
+        },
+        "audioMusic": {
+          "type": "boolean",
+          "description": "Procedural synth music enabled toggle."
+        },
+        "qualityPreset": {
+          "type": "string",
+          "description": "Graphics quality preset for performance optimization.",
+          "enum": ["auto", "low", "high"]
+        },
+        "touchControls": {
+          "type": "boolean",
+          "description": "On-screen directional buttons toggle."
+        },
+        "purchases": {
+          "type": "array",
+          "description": "Recent in-app purchase receipt tags (max 30)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-updated timestamp."
+        }
+      },
+      "required": [
+        "ownerId",
+        "coins",
+        "highScore",
+        "bestDistance",
+        "totalRuns",
+        "ownedSkins",
+        "equippedSkin",
+        "magnetLevel",
+        "jetpackLevel",
+        "multiplierLevel",
+        "hoverboards",
+        "adFree",
+        "personalizedAds",
+        "audioSfx",
+        "audioMusic",
+        "qualityPreset",
+        "touchControls",
+        "purchases",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PrivateAccountInfo": {
+      "title": "PrivateAccountInfo",
+      "description": "Isolated PII document storing user email and privacy consent.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the account owner.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "description": "Verified account email address.",
+          "maxLength": 254
+        },
+        "privacyConsent": {
+          "type": "boolean",
+          "description": "Whether the player acknowledged the privacy policy."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-updated timestamp."
+        }
+      },
+      "required": [
+        "ownerId",
+        "email",
+        "privacyConsent",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Public competitive leaderboard profile with zero PII.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the player.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Public runner display name.",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "friendCode": {
+          "type": "string",
+          "description": "Short friend lookup code.",
+          "minLength": 6,
+          "maxLength": 12,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "equippedSkin": {
+          "type": "string",
+          "description": "Public skin identifier.",
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "highScore": {
+          "type": "integer",
+          "description": "Player's highest verified run score."
+        },
+        "bestDistance": {
+          "type": "integer",
+          "description": "Player's longest run in meters."
+        },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Opt-in public visibility flag (must be true)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-updated timestamp."
+        }
+      },
+      "required": [
+        "userId",
+        "displayName",
+        "friendCode",
+        "equippedSkin",
+        "highScore",
+        "bestDistance",
+        "isPublic",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Friendship": {
+      "title": "Friendship",
+      "description": "Social friend connection between two players.",
+      "type": "object",
+      "properties": {
+        "requesterId": {
+          "type": "string",
+          "description": "UID of the player who initiated the connection.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "targetId": {
+          "type": "string",
+          "description": "UID of the connected friend.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "requesterName": {
+          "type": "string",
+          "description": "Display name of requester.",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "targetName": {
+          "type": "string",
+          "description": "Display name of target player.",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "status": {
+          "type": "string",
+          "description": "Connection status.",
+          "enum": ["pending", "accepted"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-updated timestamp."
+        }
+      },
+      "required": [
+        "requesterId",
+        "targetId",
+        "requesterName",
+        "targetName",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/saves/{userId}": {
+      "schema": { "$ref": "#/entities/PlayerSave" },
+      "description": "Owner-only cloud save documents."
+    },
+    "/users_private/{userId}": {
+      "schema": { "$ref": "#/entities/PrivateAccountInfo" },
+      "description": "Owner-only PII and consent records."
+    },
+    "/leaderboard/{userId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Public high score leaderboard and friend-code directory (zero PII)."
+    },
+    "/friendships/{friendshipId}": {
+      "schema": { "$ref": "#/entities/Friendship" },
+      "description": "Social friend connections scoped to requesterId and targetId."
+    }
+  }
+}

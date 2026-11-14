@@ -1,0 +1,8 @@
+{
+  "name": "Pal Runner 3D",
+  "description": "Vibrant 3D endless subway runner with power-ups, character skins, global leaderboards, social friends, cloud saves, and responsive touch controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

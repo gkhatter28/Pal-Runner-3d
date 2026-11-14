@@ -252,7 +252,7 @@ export function sanitizeIdString(val: string, maxLen = 32): string {
 
 export function sanitizeDisplayName(val: string): string {
   const cleaned = val.trim().replace(/\s+/g, ' ').slice(0, 40);
-  return cleaned || 'Metro Runner';
+  return cleaned || 'Pal Runner';
 }
 
 export function deriveFriendCode(uid: string): string {

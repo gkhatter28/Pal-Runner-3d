@@ -175,6 +175,7 @@ export default function App() {
       onContextLostChange: (lost) => setContextLost(lost),
     });
 
+    engine.applyQualitySettings(saveRef.current.qualityPreset);
     engineRef.current = engine;
     return () => {
       engine.dispose();
@@ -185,6 +186,16 @@ export default function App() {
   // Global Pause shortcut (Escape / P)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if (e.code === 'Escape' && activeModal !== 'none') {
+        setActiveModal('none');
+        return;
+      }
+      if (activeModal !== 'none') return;
+
       if (e.code === 'Escape' || e.code === 'KeyP') {
         if (phaseRef.current === 'playing') {
           engineRef.current?.setPhase('paused');
@@ -197,7 +208,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [activeModal]);
 
   const handleStartRun = useCallback(() => {
     soundEngine.playUiClick();
@@ -284,8 +295,12 @@ export default function App() {
 
   const handleSignOut = async () => {
     soundEngine.playUiClick();
-    await signOutAccount();
-    showNotice('Signed out — switched to local Guest mode');
+    try {
+      await signOutAccount();
+      showNotice('Signed out — switched to local Guest mode');
+    } catch {
+      showNotice('Could not sign out right now — please try again');
+    }
   };
 
   const handleManualSync = async () => {
@@ -378,16 +393,20 @@ export default function App() {
   };
 
   const handleDeleteAccountData = async () => {
-    if (user) {
-      await deleteAllCloudAccountData(user);
+    try {
+      if (user) {
+        await deleteAllCloudAccountData(user);
+      }
+      const fresh: PlayerSaveState = { ...DEFAULT_SAVE_STATE };
+      saveRef.current = fresh;
+      setSave(fresh);
+      persistLocalSave(fresh);
+      engineRef.current?.setSkin(getSkinById(fresh.equippedSkin));
+      engineRef.current?.applyQualitySettings(fresh.qualityPreset);
+      showNotice('Account data erased and progress reset');
+    } catch {
+      showNotice('Could not delete cloud account data — check connection and try again');
     }
-    const fresh: PlayerSaveState = { ...DEFAULT_SAVE_STATE };
-    saveRef.current = fresh;
-    setSave(fresh);
-    persistLocalSave(fresh);
-    engineRef.current?.setSkin(getSkinById(fresh.equippedSkin));
-    engineRef.current?.applyQualitySettings(fresh.qualityPreset);
-    showNotice('Account data erased and progress reset');
   };
 
   return (

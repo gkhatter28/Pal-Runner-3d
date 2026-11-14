@@ -167,7 +167,7 @@ service cloud.firestore {
 
     // /leaderboard/{userId} - Public High Score Board & Friend Directory
     match /leaderboard/{userId} {
-      allow get: if isValidId(userId) && resource.data.isPublic == true;
+      allow get: if isValidId(userId) && (resource == null || resource.data.isPublic == true);
       allow list: if resource.data.isPublic == true;
       allow create: if isValidId(userId)
         && isVerified()
@@ -195,7 +195,7 @@ service cloud.firestore {
     match /friendships/{friendshipId} {
       allow get: if isValidId(friendshipId)
         && isSignedIn()
-        && (resource.data.requesterId == request.auth.uid || resource.data.targetId == request.auth.uid);
+        && (resource == null || resource.data.requesterId == request.auth.uid || resource.data.targetId == request.auth.uid);
       allow list: if isSignedIn()
         && (resource.data.requesterId == request.auth.uid || resource.data.targetId == request.auth.uid);
       allow create: if isValidId(friendshipId)

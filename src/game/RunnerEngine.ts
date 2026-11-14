@@ -1403,6 +1403,13 @@ export class RunnerEngine {
     this.materialsToDispose.forEach((m) => m.dispose());
     this.obstaclePool.forEach((o) => this.disposeObject3D(o.mesh));
     this.powerUpPool.forEach((p) => this.disposeObject3D(p.mesh));
+    this.particlePool.forEach((pt) => {
+      if (Array.isArray(pt.mesh.material)) {
+        pt.mesh.material.forEach((m) => m.dispose());
+      } else {
+        pt.mesh.material.dispose();
+      }
+    });
     this.disposeObject3D(this.runnerRig.root);
 
     this.renderer.dispose();

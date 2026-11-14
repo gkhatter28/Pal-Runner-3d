@@ -33,6 +33,25 @@ interface LeaderboardModalProps {
   onSignIn: () => void;
 }
 
+function formatLeaderboardError(err: unknown, fallback: string): string {
+  if (!(err instanceof Error)) return fallback;
+  try {
+    const parsed = JSON.parse(err.message) as { error?: string };
+    if (typeof parsed.error === 'string' && parsed.error.length > 0) {
+      if (parsed.error.toLowerCase().includes('permission')) {
+        return 'Permission error while updating leaderboard data. Please sign in again.';
+      }
+      if (parsed.error.toLowerCase().includes('offline')) {
+        return 'You appear to be offline. Rankings will load once connected.';
+      }
+      return parsed.error;
+    }
+  } catch {
+    // Plain error message
+  }
+  return err.message || fallback;
+}
+
 export function LeaderboardModal({ user, onClose, onSignIn }: LeaderboardModalProps) {
   const [tab, setTab] = useState<'global' | 'friends'>('global');
   const [globalRows, setGlobalRows] = useState<LeaderboardEntry[]>([]);
@@ -58,7 +77,7 @@ export function LeaderboardModal({ user, onClose, onSignIn }: LeaderboardModalPr
         setFriendRows(fBoard);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load rankings.');
+      setError(formatLeaderboardError(err, 'Could not load rankings.'));
     } finally {
       setLoading(false);
     }
@@ -96,18 +115,28 @@ export function LeaderboardModal({ user, onClose, onSignIn }: LeaderboardModalPr
       setFriendMsg(`Friend request sent to ${target.displayName}.`);
       await loadData();
     } catch (err) {
-      setFriendMsg(err instanceof Error ? err.message : 'Unable to send friend request.');
+      setFriendMsg(formatLeaderboardError(err, 'Unable to send friend request.'));
     }
   };
 
   const handleAccept = async (id: string) => {
-    await acceptFriendRequest(id);
-    await loadData();
+    setFriendMsg(null);
+    try {
+      await acceptFriendRequest(id);
+      await loadData();
+    } catch (err) {
+      setFriendMsg(formatLeaderboardError(err, 'Unable to accept friend request.'));
+    }
   };
 
   const handleRemove = async (id: string) => {
-    await removeFriendship(id);
-    await loadData();
+    setFriendMsg(null);
+    try {
+      await removeFriendship(id);
+      await loadData();
+    } catch (err) {
+      setFriendMsg(formatLeaderboardError(err, 'Unable to remove friend request.'));
+    }
   };
 
   const incomingRequests = user

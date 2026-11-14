@@ -19,7 +19,6 @@ import {
   collection,
   query,
   where,
-  orderBy,
   limit,
   getDocs,
   serverTimestamp,
@@ -334,7 +333,7 @@ export async function upsertLeaderboardEntry(
 ): Promise<void> {
   const path = `leaderboard/${user.uid}`;
   const uid = sanitizeIdString(user.uid, 128);
-  const displayName = sanitizeDisplayName(user.displayName ?? 'Metro Runner');
+  const displayName = sanitizeDisplayName(user.displayName ?? 'Pal Runner');
   const friendCode = deriveFriendCode(uid);
   const equippedSkin = sanitizeIdString(state.equippedSkin, 32);
   const highScore = clampInt(state.highScore, 0, 100000000);
@@ -376,11 +375,13 @@ export async function fetchGlobalLeaderboard(): Promise<LeaderboardEntry[]> {
     const q = query(
       collection(db, 'leaderboard'),
       where('isPublic', '==', true),
-      orderBy('highScore', 'desc'),
-      limit(25),
+      limit(100),
     );
     const snap = await getDocs(q);
-    return snap.docs.map((d) => d.data() as LeaderboardEntry);
+    return snap.docs
+      .map((d) => d.data() as LeaderboardEntry)
+      .sort((a, b) => b.highScore - a.highScore)
+      .slice(0, 25);
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
   }
@@ -402,6 +403,26 @@ export async function findPlayerByFriendCode(code: string): Promise<LeaderboardE
     if (snap.empty) return null;
     return snap.docs[0].data() as LeaderboardEntry;
   } catch (error) {
+    const errCode =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: unknown }).code)
+        : '';
+    if (errCode === 'failed-precondition') {
+      try {
+        const fallbackQ = query(
+          collection(db, 'leaderboard'),
+          where('isPublic', '==', true),
+          limit(250),
+        );
+        const fallbackSnap = await getDocs(fallbackQ);
+        const match = fallbackSnap.docs
+          .map((d) => d.data() as LeaderboardEntry)
+          .find((entry) => entry.friendCode === cleaned);
+        return match ?? null;
+      } catch (fallbackErr) {
+        handleFirestoreError(fallbackErr, OperationType.LIST, path);
+      }
+    }
     handleFirestoreError(error, OperationType.LIST, path);
   }
 }
@@ -444,7 +465,7 @@ export async function sendFriendRequest(
     await setDoc(ref, {
       requesterId,
       targetId,
-      requesterName: sanitizeDisplayName(currentUser.displayName ?? 'Metro Runner'),
+      requesterName: sanitizeDisplayName(currentUser.displayName ?? 'Pal Runner'),
       targetName: sanitizeDisplayName(target.displayName),
       status: 'pending',
       createdAt: serverTimestamp(),

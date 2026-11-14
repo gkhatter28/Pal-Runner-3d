@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
@@ -111,8 +112,29 @@ export function subscribeToAuth(callback: (user: User | null) => void): () => vo
 }
 
 export async function signInWithGoogle(): Promise<User> {
-  const cred = await signInWithPopup(auth, googleProvider);
-  return cred.user;
+  try {
+    const cred = await signInWithPopup(auth, googleProvider);
+    return cred.user;
+  } catch (error) {
+    if (Capacitor.isNativePlatform()) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: unknown }).code)
+          : '';
+      if (
+        code === 'auth/popup-blocked' ||
+        code === 'auth/operation-not-supported-in-this-environment' ||
+        code === 'auth/unauthorized-domain' ||
+        code === 'auth/cancelled-popup-request' ||
+        code === 'auth/internal-error'
+      ) {
+        throw new Error(
+          'Google popup sign-in is restricted inside the Android WebView. You can keep playing in Guest mode locally, or sign in via the web app for Cloud Sync.',
+        );
+      }
+    }
+    throw error;
+  }
 }
 
 export async function signOutAccount(): Promise<void> {

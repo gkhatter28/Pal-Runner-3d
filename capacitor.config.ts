@@ -1,0 +1,13 @@
+import type { CapacitorConfig } from '@capacitor/cli';
+
+const config: CapacitorConfig = {
+  appId: 'com.palrunner3d.app',
+  appName: 'Pal Runner 3D',
+  webDir: 'dist',
+  android: {
+    allowMixedContent: false,
+    backgroundColor: '#090d16',
+  },
+};
+
+export default config;

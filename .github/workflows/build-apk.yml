@@ -25,7 +25,7 @@ jobs:
 
       - name: Install web dependencies & sync Capacitor Android
         run: |
-          npm install --no-audit --no-fund
+          npm install --legacy-peer-deps --no-audit --no-fund
           npm run build
           npx cap sync android
 
@@ -103,6 +103,13 @@ jobs:
             exit 1
           fi
           echo "Temporary debug keystore verified."
+
+      - name: Ensure Android SDK licenses
+        run: |
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ -d "$SDK_DIR" ] && [ -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" --licenses >/dev/null 2>&1 || true
+          fi
 
       - name: Build debug APK
         working-directory: android
@@ -193,7 +200,8 @@ jobs:
 
           TAG_NAME="debug-apk-build-${{ github.run_number }}-${{ github.run_attempt }}"
           RELEASE_TITLE="Debug APK Build #${{ github.run_number }}"
-          NOTES=$(cat <<EOF
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+          cat <<EOF > "$NOTES_FILE"
           Auto-generated **debug APK** built via GitHub Actions.
 
           - **App:** Pal Runner 3D (Capacitor Android)
@@ -203,13 +211,12 @@ jobs:
 
           > **Testing Only:** This APK is signed with a temporary workflow-generated debug keystore and is intended for direct Android device testing only (not for Google Play Store production distribution).
           EOF
-          )
 
           RELEASE_URL="$(gh release create "$TAG_NAME" "$ASSET_PATH" \
             --title "$RELEASE_TITLE" \
             --target "${{ github.sha }}" \
             --latest \
-            --notes "$NOTES")"
+            --notes-file "$NOTES_FILE")"
 
           echo "release_tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
           echo "release_title=${RELEASE_TITLE}" >> "$GITHUB_OUTPUT"

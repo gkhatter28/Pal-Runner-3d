@@ -1,11 +1,19 @@
 import { Capacitor } from '@capacitor/core';
-import { AdMob, MaxAdContentRating } from '@capacitor-community/admob';
+import {
+  AdMob,
+  BannerAdPosition,
+  BannerAdSize,
+  MaxAdContentRating,
+} from '@capacitor-community/admob';
 
 export const ADMOB_APP_ID = 'ca-app-pub-6043186517327565~7998012030';
 export const ADMOB_AD_UNIT_ID = 'ca-app-pub-6043186517327565/1069466598';
+export const UNITY_AD_PLACEMENT_ID = 'BP_Banner_Android';
+export const UNITY_AD_UNIT_ID = '54fa67b9-1b1d-4c17-80cf-d6dd88292b3d';
 
 let initialized = false;
 let initPromise: Promise<void> | null = null;
+let bannerActive = false;
 
 export async function initializeAdMob(): Promise<void> {
   if (!Capacitor.isNativePlatform() || initialized) return;
@@ -32,6 +40,36 @@ export async function syncAdMobAudio(sfxEnabled: boolean, musicEnabled: boolean)
     await AdMob.setApplicationMuted({ muted: !sfxEnabled && !musicEnabled });
   } catch {
     // Ignore audio sync errors
+  }
+}
+
+export async function showBannerAd(personalizedAds: boolean): Promise<void> {
+  if (!Capacitor.isNativePlatform() || bannerActive) return;
+
+  await initializeAdMob();
+  if (!initialized) return;
+
+  try {
+    await AdMob.showBanner({
+      adId: ADMOB_AD_UNIT_ID,
+      adSize: BannerAdSize.BANNER,
+      position: BannerAdPosition.BOTTOM_CENTER,
+      margin: 0,
+      npa: !personalizedAds,
+    });
+    bannerActive = true;
+  } catch {
+    bannerActive = false;
+  }
+}
+
+export async function hideBannerAd(): Promise<void> {
+  if (!Capacitor.isNativePlatform() || !bannerActive) return;
+  bannerActive = false;
+  try {
+    await AdMob.removeBanner();
+  } catch {
+    // Ignore banner cleanup errors
   }
 }
 

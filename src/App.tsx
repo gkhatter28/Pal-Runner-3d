@@ -4,7 +4,13 @@ import { Play, Home, Settings, AlertTriangle } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { RunnerEngine } from './game/RunnerEngine';
 import { soundEngine } from './audio/soundEngine';
-import { initializeAdMob, showNativeAdMobAd, syncAdMobAudio } from './services/admob';
+import {
+  hideBannerAd,
+  initializeAdMob,
+  showBannerAd,
+  showNativeAdMobAd,
+  syncAdMobAudio,
+} from './services/admob';
 import {
   deleteAllCloudAccountData,
   loadAndSyncCloudSave,
@@ -151,6 +157,18 @@ export default function App() {
 
     return () => unsub();
   }, []);
+
+  // Show mediated banner only on the clean main menu when ads are enabled
+  useEffect(() => {
+    if (phase === 'menu' && activeModal === 'none' && !save.adFree) {
+      void showBannerAd(save.personalizedAds);
+    } else {
+      void hideBannerAd();
+    }
+    return () => {
+      void hideBannerAd();
+    };
+  }, [phase, activeModal, save.adFree, save.personalizedAds]);
 
   // Initialize Three.js RunnerEngine once inside dedicated container
   useEffect(() => {

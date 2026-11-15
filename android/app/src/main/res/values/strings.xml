@@ -4,4 +4,6 @@
     <string name="title_activity_main">Pal Runner 3D</string>
     <string name="package_name">com.palrunner3d.app</string>
     <string name="custom_url_scheme">com.palrunner3d.app</string>
+    <string name="unity_ads_placement_id">BP_Banner_Android</string>
+    <string name="unity_ads_ad_unit_id">54fa67b9-1b1d-4c17-80cf-d6dd88292b3d</string>
 </resources>

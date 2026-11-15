@@ -8,6 +8,7 @@ import {
   LogIn,
   Cloud,
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import type { User } from 'firebase/auth';
 import { getSkinById, type PlayerSaveState } from '../types/game';
 
@@ -38,8 +39,14 @@ export function MainMenuOverlay({
 }: MainMenuOverlayProps) {
   const activeSkin = getSkinById(save.equippedSkin);
 
+  const reserveNativeBannerSpace = Capacitor.isNativePlatform() && !save.adFree;
+
   return (
-    <div className="pointer-events-none fixed inset-0 z-20 flex flex-col justify-between p-4 sm:p-6">
+    <div
+      className={`pointer-events-none fixed inset-0 z-20 flex flex-col justify-between p-4 sm:p-6 ${
+        reserveNativeBannerSpace ? 'pb-16 sm:pb-20' : ''
+      }`}
+    >
       {/* 3-Zone Top Bar */}
       <header className="pointer-events-auto flex items-center justify-between gap-4 bg-slate-950/88 border border-slate-800 rounded-2xl px-4 sm:px-6 py-3 shadow-xl">
         {/* Zone 1: Wordmark */}

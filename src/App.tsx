@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { User } from 'firebase/auth';
 import { Play, Home, Settings, AlertTriangle } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { RunnerEngine } from './game/RunnerEngine';
 import { soundEngine } from './audio/soundEngine';
+import { initializeAdMob, showNativeAdMobAd, syncAdMobAudio } from './services/admob';
 import {
   deleteAllCloudAccountData,
   loadAndSyncCloudSave,
@@ -82,6 +84,8 @@ export default function App() {
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
   const [contextLost, setContextLost] = useState(false);
 
+  const adBusyRef = useRef(false);
+
   const showNotice = useCallback((msg: string) => {
     setStatusNotice(msg);
     window.setTimeout(() => {
@@ -96,6 +100,7 @@ export default function App() {
       setSave(next);
       persistLocalSave(next);
       soundEngine.setPreferences(next.audioSfx, next.audioMusic);
+      void syncAdMobAudio(next.audioSfx, next.audioMusic);
 
       const currentUser = userRef.current;
       if (syncCloud && currentUser) {
@@ -116,6 +121,9 @@ export default function App() {
   // Auth subscription & automatic cloud merge
   useEffect(() => {
     soundEngine.setPreferences(saveRef.current.audioSfx, saveRef.current.audioMusic);
+    void initializeAdMob().then(() =>
+      syncAdMobAudio(saveRef.current.audioSfx, saveRef.current.audioMusic),
+    );
 
     const unsub = subscribeToAuth(async (nextUser) => {
       setUser(nextUser);
@@ -255,30 +263,62 @@ export default function App() {
     }
   };
 
+  const grantAdReward = useCallback(
+    (kind: 'revive' | 'coins') => {
+      if (kind === 'revive') {
+        setRevivedThisRun(true);
+        setRunSummary(null);
+        setPhase('playing');
+        engineRef.current?.reviveRun();
+      } else {
+        soundEngine.playPowerUp();
+        void commitSave((prev) => ({ ...prev, coins: prev.coins + 150 }));
+        showNotice('+150 Coins claimed');
+      }
+    },
+    [commitSave, showNotice],
+  );
+
+  const triggerRewardedAd = useCallback(
+    async (kind: 'revive' | 'coins') => {
+      if (adBusyRef.current) return;
+      if (!Capacitor.isNativePlatform()) {
+        setPendingAd(kind);
+        return;
+      }
+
+      adBusyRef.current = true;
+      showNotice('Loading ad...');
+      try {
+        const outcome = await showNativeAdMobAd(saveRef.current.personalizedAds);
+        if (outcome === 'rewarded') {
+          grantAdReward(kind);
+        } else if (outcome === 'dismissed') {
+          showNotice('Finish watching the ad to claim your reward');
+        } else {
+          setPendingAd(kind);
+        }
+      } finally {
+        adBusyRef.current = false;
+      }
+    },
+    [grantAdReward, showNotice],
+  );
+
   const handleRequestRevive = () => {
     soundEngine.playUiClick();
     if (save.adFree) {
-      setRevivedThisRun(true);
-      setRunSummary(null);
-      setPhase('playing');
-      engineRef.current?.reviveRun();
+      grantAdReward('revive');
     } else {
-      setPendingAd('revive');
+      void triggerRewardedAd('revive');
     }
   };
 
   const handleAdCompleted = () => {
-    if (pendingAd === 'revive') {
-      setPendingAd('none');
-      setRevivedThisRun(true);
-      setRunSummary(null);
-      setPhase('playing');
-      engineRef.current?.reviveRun();
-    } else if (pendingAd === 'coins') {
-      setPendingAd('none');
-      soundEngine.playPowerUp();
-      void commitSave((prev) => ({ ...prev, coins: prev.coins + 150 }));
-      showNotice('+150 Coins claimed');
+    const kind = pendingAd;
+    setPendingAd('none');
+    if (kind === 'revive' || kind === 'coins') {
+      grantAdReward(kind);
     }
   };
 
@@ -462,7 +502,7 @@ export default function App() {
           }}
           onWatchCoinAd={() => {
             soundEngine.playUiClick();
-            setPendingAd('coins');
+            void triggerRewardedAd('coins');
           }}
           onSignIn={() => void handleSignIn()}
         />

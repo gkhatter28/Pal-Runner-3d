@@ -1,4 +1,4 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
   AdMob,
   BannerAdPosition,
@@ -8,8 +8,26 @@ import {
 
 export const ADMOB_APP_ID = 'ca-app-pub-6043186517327565~7998012030';
 export const ADMOB_AD_UNIT_ID = 'ca-app-pub-6043186517327565/1069466598';
+export const UNITY_GAME_ID = '800438823';
 export const UNITY_AD_PLACEMENT_ID = 'BP_Banner_Android';
 export const UNITY_AD_UNIT_ID = '54fa67b9-1b1d-4c17-80cf-d6dd88292b3d';
+
+interface UnityAdsBannerPluginInterface {
+  initialize(options: {
+    gameId: string;
+    testMode?: boolean;
+    personalizedAds?: boolean;
+  }): Promise<{ initialized: boolean; error?: string }>;
+  showBanner(options: {
+    gameId: string;
+    placementId: string;
+    testMode?: boolean;
+    personalizedAds?: boolean;
+  }): Promise<void>;
+  hideBanner(): Promise<void>;
+}
+
+const UnityAdsBanner = registerPlugin<UnityAdsBannerPluginInterface>('UnityAdsBanner');
 
 let initialized = false;
 let initPromise: Promise<void> | null = null;
@@ -21,9 +39,15 @@ export async function initializeAdMob(): Promise<void> {
 
   initPromise = (async () => {
     try {
-      await AdMob.initialize({
-        maxAdContentRating: MaxAdContentRating.General,
-      });
+      await Promise.allSettled([
+        AdMob.initialize({
+          maxAdContentRating: MaxAdContentRating.General,
+        }),
+        UnityAdsBanner.initialize({
+          gameId: UNITY_GAME_ID,
+          testMode: false,
+        }),
+      ]);
       initialized = true;
     } catch {
       // Allow retry later if initialization failed
@@ -50,6 +74,19 @@ export async function showBannerAd(personalizedAds: boolean): Promise<void> {
   if (!initialized) return;
 
   try {
+    await UnityAdsBanner.showBanner({
+      gameId: UNITY_GAME_ID,
+      placementId: UNITY_AD_PLACEMENT_ID,
+      testMode: false,
+      personalizedAds,
+    });
+    bannerActive = true;
+    return;
+  } catch {
+    // Fallback to AdMob banner if Unity banner bridge is unavailable
+  }
+
+  try {
     await AdMob.showBanner({
       adId: ADMOB_AD_UNIT_ID,
       adSize: BannerAdSize.BANNER,
@@ -66,11 +103,7 @@ export async function showBannerAd(personalizedAds: boolean): Promise<void> {
 export async function hideBannerAd(): Promise<void> {
   if (!Capacitor.isNativePlatform() || !bannerActive) return;
   bannerActive = false;
-  try {
-    await AdMob.removeBanner();
-  } catch {
-    // Ignore banner cleanup errors
-  }
+  await Promise.allSettled([UnityAdsBanner.hideBanner(), AdMob.removeBanner()]);
 }
 
 export type NativeAdOutcome = 'rewarded' | 'dismissed' | 'unavailable';

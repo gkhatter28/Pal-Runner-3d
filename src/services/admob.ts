@@ -14,6 +14,7 @@ export const UNITY_AD_PLACEMENT_ID = 'BP_Banner_Android';
 export const UNITY_AD_UNIT_ID = '54fa67b9-1b1d-4c17-80cf-d6dd88292b3d';
 
 interface UnityAdsBannerPluginInterface {
+  setPrivacyConsent(options: { personalizedAds: boolean }): Promise<void>;
   initialize(options: {
     gameId: string;
     testMode?: boolean;
@@ -37,21 +38,34 @@ let interstitialPrepared = false;
 let interstitialLoading = false;
 let interstitialShowing = false;
 
-export async function initializeAdMob(): Promise<void> {
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => {
+      window.setTimeout(() => resolve(null), ms);
+    }),
+  ]);
+}
+
+export async function initializeAdMob(personalizedAds = false): Promise<void> {
   if (!Capacitor.isNativePlatform() || initialized) return;
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
     try {
-      await Promise.allSettled([
-        AdMob.initialize({
-          maxAdContentRating: MaxAdContentRating.General,
-        }),
-        UnityAdsBanner.initialize({
-          gameId: UNITY_GAME_ID,
-          testMode: false,
-        }),
-      ]);
+      await withTimeout(
+        Promise.allSettled([
+          AdMob.initialize({
+            maxAdContentRating: MaxAdContentRating.General,
+          }),
+          UnityAdsBanner.initialize({
+            gameId: UNITY_GAME_ID,
+            testMode: false,
+            personalizedAds,
+          }),
+        ]),
+        4000,
+      );
       initialized = true;
     } catch {
       // Allow retry later if initialization failed
@@ -60,6 +74,16 @@ export async function initializeAdMob(): Promise<void> {
   })();
 
   return initPromise;
+}
+
+export async function syncAdPrivacyConsent(personalizedAds: boolean): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  interstitialPrepared = false;
+  try {
+    await UnityAdsBanner.setPrivacyConsent({ personalizedAds });
+  } catch {
+    // Ignore if bridge not ready
+  }
 }
 
 export async function syncAdMobAudio(sfxEnabled: boolean, musicEnabled: boolean): Promise<void> {
@@ -74,7 +98,7 @@ export async function syncAdMobAudio(sfxEnabled: boolean, musicEnabled: boolean)
 export async function showBannerAd(personalizedAds: boolean): Promise<void> {
   if (!Capacitor.isNativePlatform() || bannerActive) return;
 
-  await initializeAdMob();
+  await initializeAdMob(personalizedAds);
   if (!initialized) return;
 
   try {
@@ -113,7 +137,7 @@ export async function hideBannerAd(): Promise<void> {
 export async function preloadInterstitialAd(personalizedAds: boolean): Promise<void> {
   if (!Capacitor.isNativePlatform() || interstitialPrepared || interstitialLoading) return;
 
-  await initializeAdMob();
+  await initializeAdMob(personalizedAds);
   if (!initialized) return;
 
   interstitialLoading = true;
@@ -136,7 +160,7 @@ export async function showInterstitialAd(personalizedAds: boolean): Promise<bool
     return false;
   }
 
-  await initializeAdMob();
+  await initializeAdMob(personalizedAds);
   if (!initialized) {
     return false;
   }
@@ -169,7 +193,7 @@ export async function showNativeAdMobAd(personalizedAds: boolean): Promise<Nativ
     return 'unavailable';
   }
 
-  await initializeAdMob();
+  await initializeAdMob(personalizedAds);
   if (!initialized) {
     return 'unavailable';
   }

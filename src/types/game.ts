@@ -100,12 +100,15 @@ export const RUNNER_SKINS: RunnerSkin[] = [
   },
 ];
 
+export const PRIVACY_POLICY_URL =
+  'https://ais-pre-dg6g25albs3wdll5nhiqt7-418457078286.asia-northeast1.run.app/privacy-policy.html';
+
 export interface IAPProduct {
   id: string;
   name: string;
   description: string;
+  priceCoins: number;
   priceLabel: string;
-  coinsAwarded: number;
   hoverboardsAwarded: number;
   grantsAdFree?: boolean;
   unlocksSkinId?: string;
@@ -114,37 +117,37 @@ export interface IAPProduct {
 
 export const IAP_PRODUCTS: IAPProduct[] = [
   {
-    id: 'starter_coins',
-    name: 'Pocket Coin Stash',
-    description: '1,500 coins + 3 hoverboard shields to kickstart upgrades.',
-    priceLabel: '$1.99',
-    coinsAwarded: 1500,
-    hoverboardsAwarded: 3,
+    id: 'starter_shields',
+    name: 'Shield Supply Pack',
+    description: '5 hoverboard shields for crash protection during high-speed runs.',
+    priceCoins: 600,
+    priceLabel: '600 Coins',
+    hoverboardsAwarded: 5,
   },
   {
     id: 'ad_free_pass',
     name: 'Ad-Free Express Pass',
-    description: 'Removes all post-run ads permanently + instant revives + 2,000 coins.',
-    priceLabel: '$4.99',
-    coinsAwarded: 2000,
+    description: 'Removes all post-run & banner ads permanently + instant revives + 5 shields.',
+    priceCoins: 5000,
+    priceLabel: '5,000 Coins',
     hoverboardsAwarded: 5,
     grantsAdFree: true,
     featured: true,
   },
   {
-    id: 'pro_stash',
-    name: 'Metro Pro Crate',
-    description: '6,000 coins + 10 hoverboards for fast outfit & power-up unlocks.',
-    priceLabel: '$6.99',
-    coinsAwarded: 6000,
-    hoverboardsAwarded: 10,
+    id: 'pro_shields',
+    name: 'Metro Shield Crate',
+    description: '15 hoverboard shields for marathon leaderboard runs.',
+    priceCoins: 1650,
+    priceLabel: '1,650 Coins',
+    hoverboardsAwarded: 15,
   },
   {
     id: 'sovereign_vault',
     name: 'Sovereign Vault Bundle',
-    description: '15,000 coins, 20 hoverboards, Ad-Free Pass & Gold Sovereign skin.',
-    priceLabel: '$12.99',
-    coinsAwarded: 15000,
+    description: 'Unlocks Gold Sovereign skin + Ad-Free Express Pass + 20 hoverboard shields.',
+    priceCoins: 11000,
+    priceLabel: '11,000 Coins',
     hoverboardsAwarded: 20,
     grantsAdFree: true,
     unlocksSkinId: 'gold_sovereign',
@@ -170,6 +173,7 @@ export interface PlayerSaveState {
   touchControls: boolean;
   purchases: string[];
   privacyConsent: boolean;
+  privacyConsentAcknowledged?: boolean;
 }
 
 export const DEFAULT_SAVE_STATE: PlayerSaveState = {
@@ -184,13 +188,14 @@ export const DEFAULT_SAVE_STATE: PlayerSaveState = {
   multiplierLevel: 1,
   hoverboards: 2,
   adFree: false,
-  personalizedAds: true,
+  personalizedAds: false,
   audioSfx: true,
   audioMusic: true,
   qualityPreset: 'auto',
   touchControls: false,
   purchases: [],
   privacyConsent: true,
+  privacyConsentAcknowledged: false,
 };
 
 export interface ActivePowerUpTimers {

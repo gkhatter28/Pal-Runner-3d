@@ -30,6 +30,16 @@ public class UnityAdsBannerPlugin extends Plugin {
     private BannerView bannerView;
 
     @PluginMethod
+    public void setPrivacyConsent(PluginCall call) {
+        final Boolean personalizedAds = call.getBoolean("personalizedAds");
+        if (personalizedAds != null) {
+            UnityAds.setUserConsent(personalizedAds);
+            UnityAds.setNonBehavioral(!personalizedAds);
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
     public void initialize(PluginCall call) {
         final String gameId = call.getString("gameId", DEFAULT_GAME_ID);
         final boolean testMode = Boolean.TRUE.equals(call.getBoolean("testMode", false));
@@ -47,6 +57,8 @@ public class UnityAdsBannerPlugin extends Plugin {
             return;
         }
 
+        final boolean[] settled = { false };
+
         UnityAds.initialize(
             getContext().getApplicationContext(),
             gameId,
@@ -54,18 +66,24 @@ public class UnityAdsBannerPlugin extends Plugin {
             new IUnityAdsInitializationListener() {
                 @Override
                 public void onInitializationComplete() {
-                    JSObject result = new JSObject();
-                    result.put("initialized", true);
-                    call.resolve(result);
+                    if (!settled[0]) {
+                        settled[0] = true;
+                        JSObject result = new JSObject();
+                        result.put("initialized", true);
+                        call.resolve(result);
+                    }
                 }
 
                 @Override
                 public void onInitializationFailed(UnityAds.UnityAdsInitializationError error, String message) {
                     Log.w(TAG, "Unity Ads init failed: " + error + " - " + message);
-                    JSObject result = new JSObject();
-                    result.put("initialized", false);
-                    result.put("error", message);
-                    call.resolve(result);
+                    if (!settled[0]) {
+                        settled[0] = true;
+                        JSObject result = new JSObject();
+                        result.put("initialized", false);
+                        result.put("error", message);
+                        call.resolve(result);
+                    }
                 }
             }
         );
@@ -139,6 +157,7 @@ public class UnityAdsBannerPlugin extends Plugin {
         ViewGroup root = (ViewGroup) content;
 
         bannerContainer = new FrameLayout(activity);
+        bannerContainer.setVisibility(View.GONE);
         FrameLayout.LayoutParams containerParams = new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,

@@ -13,9 +13,9 @@ export function StoreModal({ save, onClose, onPurchaseProduct }: StoreModalProps
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const handleConfirmPurchase = () => {
-    if (!confirmItem) return;
+    if (!confirmItem || save.coins < confirmItem.priceCoins) return;
     onPurchaseProduct(confirmItem);
-    setSuccessMsg(`${confirmItem.name} unlocked and saved to your account.`);
+    setSuccessMsg(`${confirmItem.name} unlocked and saved.`);
     setConfirmItem(null);
   };
 
@@ -27,8 +27,8 @@ export function StoreModal({ save, onClose, onPurchaseProduct }: StoreModalProps
             <ShoppingBag className="h-5 w-5 text-emerald-400" />
             <div>
               <h2 className="font-display text-xl font-bold text-white">Metro Supply Store</h2>
-              <p className="text-xs text-slate-400">
-                In-App Purchase bundles support ongoing development · Sandbox checkout
+              <p className="text-xs text-slate-400 font-mono-num">
+                Balance: <span className="text-amber-400 font-semibold">{save.coins.toLocaleString()} Coins</span> · Unlock passes &amp; shields with earned Coins
               </p>
             </div>
           </div>
@@ -62,6 +62,13 @@ export function StoreModal({ save, onClose, onPurchaseProduct }: StoreModalProps
               const alreadyOwnsAdFree = Boolean(
                 product.id === 'ad_free_pass' && save.adFree,
               );
+              const alreadyOwnsSovereign = Boolean(
+                product.id === 'sovereign_vault' &&
+                  save.adFree &&
+                  save.ownedSkins.includes('gold_sovereign'),
+              );
+              const owned = alreadyOwnsAdFree || alreadyOwnsSovereign;
+              const canAfford = save.coins >= product.priceCoins;
 
               return (
                 <div
@@ -85,19 +92,24 @@ export function StoreModal({ save, onClose, onPurchaseProduct }: StoreModalProps
                   </div>
 
                   <div className="flex items-center justify-between pt-3 border-t border-slate-800/80">
-                    <span className="font-mono-num text-base font-bold text-white">
+                    <span className="font-mono-num text-sm font-bold text-amber-400">
                       {product.priceLabel}
                     </span>
 
-                    {alreadyOwnsAdFree ? (
+                    {owned ? (
                       <span className="text-xs font-bold text-emerald-400">Owned</span>
                     ) : (
                       <button
                         type="button"
+                        disabled={!canAfford}
                         onClick={() => setConfirmItem(product)}
-                        className="rounded-xl bg-emerald-500 hover:bg-emerald-400 px-4 py-2 text-xs font-bold text-slate-950 transition-colors"
+                        className={`rounded-xl px-4 py-2 text-xs font-bold transition-colors ${
+                          canAfford
+                            ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+                            : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        }`}
                       >
-                        Purchase
+                        Unlock
                       </button>
                     )}
                   </div>
@@ -108,18 +120,18 @@ export function StoreModal({ save, onClose, onPurchaseProduct }: StoreModalProps
         </div>
       </div>
 
-      {/* Checkout Confirmation Dialog */}
+      {/* Coin Unlock Confirmation Dialog */}
       {confirmItem && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/85 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-slate-900 border border-slate-700 p-6 shadow-2xl">
-            <div className="text-xs font-medium text-amber-400">Sandbox In-App Checkout</div>
+            <div className="text-xs font-medium text-amber-400">Metro Supply Unlock</div>
             <h3 className="font-display text-xl font-bold text-white mt-1">
               {confirmItem.name}
             </h3>
             <p className="text-sm text-slate-300 mt-2">{confirmItem.description}</p>
             <div className="mt-4 rounded-xl bg-slate-950 border border-slate-800 p-3 flex items-center justify-between text-sm">
-              <span className="text-slate-400">Total (Test Billing)</span>
-              <span className="font-mono-num font-bold text-white">{confirmItem.priceLabel}</span>
+              <span className="text-slate-400">Cost</span>
+              <span className="font-mono-num font-bold text-amber-400">{confirmItem.priceLabel}</span>
             </div>
 
             <div className="mt-5 flex items-center justify-end gap-3">
@@ -135,7 +147,7 @@ export function StoreModal({ save, onClose, onPurchaseProduct }: StoreModalProps
                 onClick={handleConfirmPurchase}
                 className="rounded-xl bg-emerald-500 hover:bg-emerald-400 px-5 py-2.5 text-sm font-bold text-slate-950"
               >
-                Confirm Purchase
+                Confirm Unlock
               </button>
             </div>
           </div>

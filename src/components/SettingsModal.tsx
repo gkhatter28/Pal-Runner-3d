@@ -10,9 +10,11 @@ import {
   Copy,
   RefreshCw,
   Trash2,
+  ExternalLink,
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import type { User } from 'firebase/auth';
-import { deriveFriendCode, type PlayerSaveState, type QualityPreset } from '../types/game';
+import { deriveFriendCode, PRIVACY_POLICY_URL, type PlayerSaveState, type QualityPreset } from '../types/game';
 
 interface SettingsModalProps {
   save: PlayerSaveState;
@@ -151,10 +153,19 @@ export function SettingsModal({
                     </div>
                   </div>
                 </div>
+              ) : Capacitor.isNativePlatform() ? (
+                <div className="rounded-xl bg-slate-950 border border-slate-800 p-5">
+                  <h3 className="font-display text-lg font-bold text-white">
+                    Local Device Save Active
+                  </h3>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Your coins, skins, upgrades, and high scores are saved automatically on this device. Global Top 25 rankings remain live whenever you are connected.
+                  </p>
+                </div>
               ) : (
                 <div className="rounded-xl bg-slate-950 border border-slate-800 p-5">
                   <h3 className="font-display text-lg font-bold text-white">
-                    Cloud Save & Social Sign-In
+                    Cloud Save &amp; Social Sign-In
                   </h3>
                   <p className="text-sm text-slate-400 mt-1">
                     Currently playing as Guest (saved locally on this browser). Sign in with Google to sync coins, skins, and upgrades across devices and join the global leaderboard.
@@ -270,22 +281,22 @@ export function SettingsModal({
               </div>
 
               <ToggleRow
-                title="Personalized Ad Previews"
-                description="Controls whether rewarded ad previews use personalized recommendations"
+                title="Personalized Ads"
+                description="Allow Google AdMob and Unity Ads to tailor ads using your device Advertising ID. Turn off for non-personalized ads."
                 checked={save.personalizedAds}
                 onChange={(v) => onUpdateSettings({ personalizedAds: v })}
               />
 
               <div className="rounded-xl bg-slate-950 border border-slate-800 p-4">
-                <div className="text-sm font-semibold text-white mb-2">Purchase History</div>
+                <div className="text-sm font-semibold text-white mb-2">Unlock History</div>
                 {save.purchases.length === 0 ? (
-                  <p className="text-xs text-slate-400">No store purchases recorded yet.</p>
+                  <p className="text-xs text-slate-400">No store bundle unlocks recorded yet.</p>
                 ) : (
                   <ul className="space-y-1.5 text-xs text-slate-300 font-mono-num">
                     {save.purchases.slice().reverse().map((p, i) => (
                       <li key={i} className="flex items-center justify-between border-b border-slate-800/70 pb-1">
                         <span>{p}</span>
-                        <span className="text-emerald-400">Fulfilled</span>
+                        <span className="text-emerald-400">Unlocked</span>
                       </li>
                     ))}
                   </ul>
@@ -297,20 +308,31 @@ export function SettingsModal({
           {tab === 'privacy' && (
             <div className="space-y-4">
               <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-3 text-xs text-slate-300 leading-relaxed">
-                <h3 className="font-display text-base font-bold text-white">
-                  Pal Runner 3D Privacy Policy
-                </h3>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="font-display text-base font-bold text-white">
+                    Pal Runner 3D Privacy Policy
+                  </h3>
+                  <a
+                    href={PRIVACY_POLICY_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-400 hover:text-cyan-300"
+                  >
+                    <span>Public Policy</span>
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </div>
                 <p>
-                  <strong className="text-white">1. Data We Collect:</strong> When you play as a Guest, your coins, unlocked outfits, upgrade levels, and settings are stored locally in your browser. When you sign in with Google, we store your game save in Cloud Firestore (<span className="font-mono-num">/saves</span>), isolate your verified email address in a strictly private document (<span className="font-mono-num">/users_private</span>) accessible only to you, and publish your chosen display name, friend code, and high score on the competitive leaderboard (<span className="font-mono-num">/leaderboard</span>).
+                  <strong className="text-white">1. Local &amp; Cloud Game Data:</strong> By default, Pal Runner 3D stores coins, unlocked skins, upgrades, and preferences locally on your device. If you sign in with Google on Web, Cloud Firestore stores your save (<span className="font-mono-num">/saves</span>), isolates your email and consent status (<span className="font-mono-num">/users_private</span>), and publishes your display name, friend code, and high score (<span className="font-mono-num">/leaderboard</span>).
                 </p>
                 <p>
-                  <strong className="text-white">2. Social & Friends:</strong> Your public leaderboard record never exposes your email address. Friends can only connect with you using your shareable Friend Code and your explicit acceptance of incoming friend requests.
+                  <strong className="text-white">2. Advertising SDKs (Google AdMob &amp; Unity Ads):</strong> The Android app integrates <strong>Google Mobile Ads SDK (AdMob)</strong> and <strong>Unity Ads SDK</strong> for rewarded, banner, and periodic post-run interstitial ads. Depending on your preference under Ads &amp; Billing, these SDKs may process your Advertising ID (AAID), IP address, device/OS info, ad interactions, and diagnostic crash logs.
                 </p>
                 <p>
-                  <strong className="text-white">3. Advertising & Purchases:</strong> Optional rewarded ad previews can be switched between personalized and non-personalized modes at any time under the Ads & Billing tab. In-app purchase receipts are stored solely to restore your coins, hoverboards, and Ad-Free Pass across devices.
+                  <strong className="text-white">3. Consent &amp; Controls:</strong> Switch between personalized and non-personalized ads anytime under the <strong>Ads &amp; Billing</strong> tab, or unlock the Ad-Free Express Pass with in-game Coins.
                 </p>
                 <p>
-                  <strong className="text-white">4. Your Rights & Data Deletion:</strong> You may delete your cloud save, private account record, and public leaderboard entry permanently at any time using the button below.
+                  <strong className="text-white">4. Data Deletion &amp; Contact:</strong> Erase local and cloud account data permanently using the button below, or contact <span className="text-cyan-300">gkhatter28@gmail.com</span>.
                 </p>
               </div>
 

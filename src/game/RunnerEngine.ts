@@ -74,6 +74,7 @@ export interface EngineCallbacks {
   onHudUpdate: (hud: LiveRunHUD) => void;
   onCrash: (score: number, distance: number, coinsEarned: number) => void;
   onContextLostChange?: (lost: boolean) => void;
+  onAutoPause?: () => void;
 }
 
 export interface RunConfig {
@@ -200,7 +201,9 @@ export class RunnerEngine {
 
     // Studio Environment Reflection (mandatory on all devices)
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+    const roomEnv = new RoomEnvironment();
+    this.scene.environment = pmremGenerator.fromScene(roomEnv, 0.04).texture;
+    roomEnv.dispose();
     pmremGenerator.dispose();
 
     this.camera = new THREE.PerspectiveCamera(62, width / height, 0.2, 180);
@@ -1361,9 +1364,17 @@ export class RunnerEngine {
     this.callbacks.onContextLostChange?.(false);
   };
 
+  private handleVisibilityChange = (): void => {
+    if (document.hidden && this.phase === 'playing') {
+      this.setPhase('paused');
+      this.callbacks.onAutoPause?.();
+    }
+  };
+
   private bindEvents(): void {
     window.addEventListener('resize', this.handleResize);
     window.addEventListener('keydown', this.handleKeyDown);
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
     const canvas = this.renderer.domElement;
     canvas.addEventListener('touchstart', this.handleTouchStart, { passive: true });
     canvas.addEventListener('touchmove', this.handleTouchMove, { passive: true });
@@ -1392,12 +1403,14 @@ export class RunnerEngine {
 
     window.removeEventListener('resize', this.handleResize);
     window.removeEventListener('keydown', this.handleKeyDown);
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     const canvas = this.renderer.domElement;
     canvas.removeEventListener('touchstart', this.handleTouchStart);
     canvas.removeEventListener('touchmove', this.handleTouchMove);
     canvas.removeEventListener('webglcontextlost', this.handleContextLost);
     canvas.removeEventListener('webglcontextrestored', this.handleContextRestored);
 
+    this.scene.environment?.dispose();
     this.textures.dispose();
     this.geometriesToDispose.forEach((g) => g.dispose());
     this.materialsToDispose.forEach((m) => m.dispose());

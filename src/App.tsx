@@ -12,6 +12,7 @@ import {
   showInterstitialAd,
   showNativeAdMobAd,
   syncAdMobAudio,
+  syncAdPrivacyConsent,
 } from './services/admob';
 import {
   deleteAllCloudAccountData,
@@ -25,6 +26,7 @@ import {
 } from './services/firebase';
 import {
   DEFAULT_SAVE_STATE,
+  PRIVACY_POLICY_URL,
   getSkinById,
   type GamePhase,
   type IAPProduct,
@@ -129,12 +131,6 @@ export default function App() {
   // Auth subscription & automatic cloud merge
   useEffect(() => {
     soundEngine.setPreferences(saveRef.current.audioSfx, saveRef.current.audioMusic);
-    void initializeAdMob().then(() => {
-      void syncAdMobAudio(saveRef.current.audioSfx, saveRef.current.audioMusic);
-      if (!saveRef.current.adFree) {
-        void preloadInterstitialAd(saveRef.current.personalizedAds);
-      }
-    });
 
     const unsub = subscribeToAuth(async (nextUser) => {
       setUser(nextUser);
@@ -156,16 +152,28 @@ export default function App() {
           setSyncing(false);
         }
       } else {
-        setLastSyncedLabel('Guest mode (local save)');
+        setLastSyncedLabel('Local device save active');
       }
     });
 
     return () => unsub();
   }, []);
 
-  // Show mediated banner only on the clean main menu when ads are enabled
+  // Initialize AdMob & Unity Ads only after explicit user privacy preference acknowledgement
   useEffect(() => {
-    if (phase === 'menu' && activeModal === 'none' && !save.adFree) {
+    if (!save.privacyConsentAcknowledged) return;
+
+    void initializeAdMob(save.personalizedAds).then(() => {
+      void syncAdMobAudio(saveRef.current.audioSfx, saveRef.current.audioMusic);
+      if (!saveRef.current.adFree) {
+        void preloadInterstitialAd(saveRef.current.personalizedAds);
+      }
+    });
+  }, [save.privacyConsentAcknowledged, save.personalizedAds]);
+
+  // Show mediated banner only on the clean main menu after privacy acknowledgement when ads are enabled
+  useEffect(() => {
+    if (save.privacyConsentAcknowledged && phase === 'menu' && activeModal === 'none' && !save.adFree) {
       void showBannerAd(save.personalizedAds);
     } else {
       void hideBannerAd();
@@ -173,7 +181,7 @@ export default function App() {
     return () => {
       void hideBannerAd();
     };
-  }, [phase, activeModal, save.adFree, save.personalizedAds]);
+  }, [phase, activeModal, save.adFree, save.personalizedAds, save.privacyConsentAcknowledged]);
 
   // Initialize Three.js RunnerEngine once inside dedicated container
   useEffect(() => {
@@ -204,6 +212,11 @@ export default function App() {
         }));
       },
       onContextLostChange: (lost) => setContextLost(lost),
+      onAutoPause: () => {
+        if (phaseRef.current === 'playing') {
+          setPhase('paused');
+        }
+      },
     });
 
     engine.applyQualitySettings(saveRef.current.qualityPreset);
@@ -365,7 +378,7 @@ export default function App() {
         } else if (outcome === 'dismissed') {
           showNotice('Finish watching the ad to claim your reward');
         } else {
-          setPendingAd(kind);
+          showNotice('No ad ready right now — check your connection and try again.');
         }
       } finally {
         adBusyRef.current = false;
@@ -472,10 +485,15 @@ export default function App() {
   };
 
   const handlePurchaseIap = (product: IAPProduct) => {
+    if (saveRef.current.coins < product.priceCoins) {
+      showNotice(`Need ${(product.priceCoins - saveRef.current.coins).toLocaleString()} more Coins`);
+      return;
+    }
     soundEngine.playPowerUp();
     const stamp = new Date().toISOString().slice(0, 10);
     const receipt = `${product.id}:${stamp}`;
     void commitSave((prev) => {
+      if (prev.coins < product.priceCoins) return prev;
       const nextSkins = product.unlocksSkinId
         ? Array.from(new Set([...prev.ownedSkins, product.unlocksSkinId]))
         : prev.ownedSkins;
@@ -484,7 +502,7 @@ export default function App() {
       }
       return {
         ...prev,
-        coins: prev.coins + product.coinsAwarded,
+        coins: Math.max(0, prev.coins - product.priceCoins),
         hoverboards: Math.min(999, prev.hoverboards + product.hoverboardsAwarded),
         adFree: prev.adFree || Boolean(product.grantsAdFree),
         ownedSkins: nextSkins,
@@ -492,13 +510,31 @@ export default function App() {
         purchases: [...prev.purchases, receipt].slice(-30),
       };
     });
+    showNotice(`${product.name} unlocked`);
   };
 
   const handleUpdateSettings = (patch: Partial<PlayerSaveState>) => {
     if (patch.qualityPreset) {
       engineRef.current?.applyQualitySettings(patch.qualityPreset);
     }
+    if (patch.personalizedAds !== undefined) {
+      void syncAdPrivacyConsent(patch.personalizedAds);
+    }
     void commitSave((prev) => ({ ...prev, ...patch }));
+  };
+
+  const handleConsentChoice = (personalized: boolean) => {
+    soundEngine.playUiClick();
+    void syncAdPrivacyConsent(personalized);
+    void commitSave(
+      (prev) => ({
+        ...prev,
+        personalizedAds: personalized,
+        privacyConsent: true,
+        privacyConsentAcknowledged: true,
+      }),
+      false,
+    );
   };
 
   const handleDeleteAccountData = async () => {
@@ -692,8 +728,50 @@ export default function App() {
         />
       )}
 
-      {/* Rewarded Ad Preview */}
-      {pendingAd !== 'none' && (
+      {/* First-Launch Privacy & Ad Consent Dialog */}
+      {!save.privacyConsentAcknowledged && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 p-6 shadow-2xl">
+            <h2 className="font-display text-xl font-bold text-white">
+              Privacy &amp; Ad Preferences
+            </h2>
+            <p className="mt-2 text-xs leading-relaxed text-slate-300">
+              Pal Runner 3D stores your game progress locally on your device. This app displays ads via{' '}
+              <strong className="text-slate-100">Google Mobile Ads (AdMob)</strong> and{' '}
+              <strong className="text-slate-100">Unity Ads</strong>, which may collect device identifiers and ad interaction metrics according to your preference below.
+            </p>
+            <div className="mt-3">
+              <a
+                href={PRIVACY_POLICY_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-medium text-cyan-400 underline underline-offset-4 hover:text-cyan-300"
+              >
+                Read Full Privacy Policy
+              </a>
+            </div>
+            <div className="mt-5 flex flex-col gap-2.5">
+              <button
+                type="button"
+                onClick={() => handleConsentChoice(false)}
+                className="rounded-xl bg-amber-500 hover:bg-amber-400 px-4 py-3 text-sm font-bold text-slate-950 transition-colors"
+              >
+                Continue with Non-Personalized Ads
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConsentChoice(true)}
+                className="rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-3 text-sm font-medium text-slate-100 transition-colors"
+              >
+                Allow Personalized Ads
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rewarded Ad Preview (Web browser preview only; never rendered on native Android) */}
+      {!Capacitor.isNativePlatform() && pendingAd !== 'none' && (
         <AdPreviewModal
           rewardLabel={pendingAd === 'revive' ? 'Revive & Continue Run' : '+150 Coins'}
           personalizedAds={save.personalizedAds}

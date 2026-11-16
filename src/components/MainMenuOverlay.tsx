@@ -75,6 +75,15 @@ export function MainMenuOverlay({
               <span className="max-w-[110px] truncate">{user.displayName ?? 'Synced'}</span>
               {syncing && <span className="text-xs text-slate-400">Syncing</span>}
             </button>
+          ) : Capacitor.isNativePlatform() ? (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="flex items-center gap-2 rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-xs sm:text-sm font-medium text-slate-100 hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
+            >
+              <Cloud className="h-4 w-4 text-emerald-400" />
+              <span>Local Save</span>
+            </button>
           ) : (
             <button
               type="button"

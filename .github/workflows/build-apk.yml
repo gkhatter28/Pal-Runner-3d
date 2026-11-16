@@ -1,4 +1,4 @@
-name: Build Debug APK & Publish Release
+name: Build Release & Debug APKs
 
 on:
   push:
@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  build-debug-apk:
-    name: Build Debug APK
+  build-release-apk:
+    name: Build Signed Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -35,59 +35,122 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Verify Java environment
-        run: |
-          set -euo pipefail
-          echo "JAVA_HOME=${JAVA_HOME:-}"
-          if [ -z "${JAVA_HOME:-}" ]; then
-            echo "::error::JAVA_HOME is not set."
-            exit 1
-          fi
-
-          JAVA_VER_OUTPUT="$(java -version 2>&1)"
-          echo "$JAVA_VER_OUTPUT"
-
-          RAW_VERSION="$(printf '%s\n' "$JAVA_VER_OUTPUT" | head -n 1 | sed -nE 's/.*version "([^"]+)".*/\1/p')"
-          if [ -z "$RAW_VERSION" ]; then
-            echo "::error::Unable to detect active Java version."
-            exit 1
-          fi
-
-          MAJOR_VERSION="${RAW_VERSION%%.*}"
-          if [ "$MAJOR_VERSION" = "1" ]; then
-            MAJOR_VERSION="$(printf '%s' "$RAW_VERSION" | cut -d. -f2)"
-          fi
-          MAJOR_VERSION="${MAJOR_VERSION%%[^0-9]*}"
-
-          if [ -z "$MAJOR_VERSION" ]; then
-            echo "::error::Unable to parse active Java major version from '$RAW_VERSION'."
-            exit 1
-          fi
-
-          echo "Detected Java major version: $MAJOR_VERSION"
-          if [ "$MAJOR_VERSION" -lt 21 ]; then
-            echo "::error::Java 21 or newer is required by Capacitor Android (detected Java $MAJOR_VERSION)."
-            exit 1
-          fi
-
       - name: Set up Gradle 8.14.3
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
 
-      - name: Create temporary debug keystore
-        working-directory: android
+      - name: Ensure Android SDK licenses
+        run: |
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ -d "$SDK_DIR" ] && [ -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" --licenses >/dev/null 2>&1 || true
+          fi
+
+      - name: Check release keystore secrets
+        id: keystore_check
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          KEYTOOL_BIN="${JAVA_HOME}/bin/keytool"
-          if [ ! -x "$KEYTOOL_BIN" ]; then
-            echo "::error::keytool not found in JAVA_HOME/bin."
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASS" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASS" ]; then
+            KEYSTORE_FILE="${RUNNER_TEMP}/palrunner-release.jks"
+            printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_FILE"
+            if [ ! -s "$KEYSTORE_FILE" ]; then
+              echo "::error::Decoded release keystore file is empty."
+              exit 1
+            fi
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "keystore_path=${KEYSTORE_FILE}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Release signing secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) are not set. Skipping signed release APK; building internal test debug APK only."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build signed Release APK
+        if: steps.keystore_check.outputs.configured == 'true'
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.keystore_check.outputs.keystore_path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Verify Release APK signature & manifest
+        if: steps.keystore_check.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_PATH" ] || [ ! -s "$APK_PATH" ]; then
+            echo "::error::Signed release APK missing at $APK_PATH"
             exit 1
           fi
 
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          BUILD_TOOLS_DIR="$(find "$SDK_DIR/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+
+          if [ -x "$BUILD_TOOLS_DIR/apksigner" ]; then
+            "$BUILD_TOOLS_DIR/apksigner" verify --verbose --print-certs "$APK_PATH"
+          fi
+
+          if [ -x "$BUILD_TOOLS_DIR/aapt2" ]; then
+            BADGING="$("$BUILD_TOOLS_DIR/aapt2" dump badging "$APK_PATH")"
+            printf '%s\n' "$BADGING" | head -n 5
+            if printf '%s\n' "$BADGING" | grep -q "application-debuggable"; then
+              echo "::error::Release APK must NOT be marked application-debuggable!"
+              exit 1
+            fi
+          fi
+
+          echo "Verified signed release APK: $APK_PATH ($(wc -c < "$APK_PATH") bytes)"
+
+      - name: Upload signed Release APK artifact
+        if: steps.keystore_check.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Stage & publish signed Release APK to GitHub Releases
+        if: steps.keystore_check.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          APK_SOURCE="android/app/build/outputs/apk/release/app-release.apk"
+          ASSET_PATH="${RUNNER_TEMP}/pal-runner-3d-v1.0.1-release-${{ github.run_number }}.apk"
+          cp "$APK_SOURCE" "$ASSET_PATH"
+
+          TAG_NAME="release-v1.0.1-build-${{ github.run_number }}"
+          RELEASE_TITLE="Pal Runner 3D v1.0.1 (Release Build #${{ github.run_number }})"
+          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
+          cat <<EOF > "$NOTES_FILE"
+          Signed **Release APK** built via GitHub Actions.
+
+          - **App:** Pal Runner 3D (\`com.palrunner3d.app\`)
+          - **Version:** \`1.0.1\` (\`versionCode 2\`)
+          - **Commit:** \`${{ github.sha }}\`
+          - **Verified:** Signed with repository release keystore, \`application-debuggable\` absent.
+          EOF
+
+          gh release create "$TAG_NAME" "$ASSET_PATH" \
+            --title "$RELEASE_TITLE" \
+            --target "${{ github.sha }}" \
+            --latest \
+            --notes-file "$NOTES_FILE"
+
+      - name: Build internal testing Debug APK (fallback when release secrets missing)
+        if: steps.keystore_check.outputs.configured != 'true'
+        working-directory: android
+        run: |
+          set -euo pipefail
           if [ ! -f ./debug.keystore ]; then
-            "$KEYTOOL_BIN" -genkeypair \
-              -v \
+            "${JAVA_HOME}/bin/keytool" -genkeypair \
               -keystore ./debug.keystore \
               -storepass android \
               -alias androiddebugkey \
@@ -97,165 +160,37 @@ jobs:
               -keysize 2048 \
               -validity 10000 >/dev/null 2>&1
           fi
+          gradle :app:assembleDebug --stacktrace --no-daemon
 
-          if [ ! -f ./debug.keystore ]; then
-            echo "::error::Failed to create ./debug.keystore."
-            exit 1
-          fi
-          echo "Temporary debug keystore verified."
-
-      - name: Ensure Android SDK licenses
-        run: |
-          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          if [ -d "$SDK_DIR" ] && [ -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
-            yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" --licenses >/dev/null 2>&1 || true
-          fi
-
-      - name: Build debug APK
-        working-directory: android
-        run: gradle :app:assembleDebug --stacktrace --no-daemon
-
-      - name: Verify debug APK
-        run: |
-          set -euo pipefail
-          APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
-          if [ ! -e "$APK_PATH" ]; then
-            echo "::error::Expected debug APK not found at $APK_PATH"
-            if [ -d "android/app/build/outputs/apk" ]; then
-              echo "Discovered files under android/app/build/outputs/apk:"
-              find android/app/build/outputs/apk -type f -name '*.apk' || true
-            fi
-            exit 1
-          fi
-
-          if [ ! -f "$APK_PATH" ] || [ ! -s "$APK_PATH" ]; then
-            echo "::error::$APK_PATH is not a non-empty regular file."
-            exit 1
-          fi
-
-          case "$APK_PATH" in
-            *.apk) ;;
-            *)
-              echo "::error::$APK_PATH does not have the .apk extension."
-              exit 1
-              ;;
-          esac
-
-          echo "Verified debug APK: $APK_PATH ($(wc -c < "$APK_PATH") bytes)"
-
-      - name: Upload debug APK artifact
+      - name: Upload internal testing Debug APK artifact
+        if: steps.keystore_check.outputs.configured != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
+          name: app-debug-apk-testing-only
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Prepare APK release asset
-        id: prepare_asset
-        run: |
-          set -euo pipefail
-          APK_SOURCE="android/app/build/outputs/apk/debug/app-debug.apk"
-          if [ ! -f "$APK_SOURCE" ] || [ ! -s "$APK_SOURCE" ]; then
-            echo "::error::Verified debug APK missing before release staging."
-            exit 1
-          fi
-
-          REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          SAFE_REPO="$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+|-+$//g')"
-          if [ -z "$SAFE_REPO" ]; then
-            SAFE_REPO="pal-runner-3d"
-          fi
-
-          STAGE_DIR="${RUNNER_TEMP}/apk-release-asset"
-          mkdir -p "$STAGE_DIR"
-          ASSET_NAME="${SAFE_REPO}-debug-build-${{ github.run_number }}.apk"
-          ASSET_PATH="${STAGE_DIR}/${ASSET_NAME}"
-
-          cp "$APK_SOURCE" "$ASSET_PATH"
-
-          if [ ! -f "$ASSET_PATH" ] || [ ! -s "$ASSET_PATH" ]; then
-            echo "::error::Failed to stage release APK asset at $ASSET_PATH"
-            exit 1
-          fi
-
-          echo "asset_name=${ASSET_NAME}" >> "$GITHUB_OUTPUT"
-          echo "asset_path=${ASSET_PATH}" >> "$GITHUB_OUTPUT"
-          echo "Staged release asset: ${ASSET_NAME} ($(wc -c < "$ASSET_PATH") bytes)"
-
-      - name: Publish APK to GitHub Releases
-        id: publish_release
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh --version
-
-          ASSET_PATH="${{ steps.prepare_asset.outputs.asset_path }}"
-          ASSET_NAME="${{ steps.prepare_asset.outputs.asset_name }}"
-          if [ ! -f "$ASSET_PATH" ] || [ ! -s "$ASSET_PATH" ]; then
-            echo "::error::Release APK asset missing or empty: $ASSET_PATH"
-            exit 1
-          fi
-
-          TAG_NAME="debug-apk-build-${{ github.run_number }}-${{ github.run_attempt }}"
-          RELEASE_TITLE="Debug APK Build #${{ github.run_number }}"
-          NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
-          cat <<EOF > "$NOTES_FILE"
-          Auto-generated **debug APK** built via GitHub Actions.
-
-          - **App:** Pal Runner 3D (Capacitor Android)
-          - **Run:** #${{ github.run_number }} (attempt ${{ github.run_attempt }})
-          - **Commit:** \`${{ github.sha }}\`
-          - **Asset:** \`${ASSET_NAME}\`
-
-          > **Testing Only:** This APK is signed with a temporary workflow-generated debug keystore and is intended for direct Android device testing only (not for Google Play Store production distribution).
-          EOF
-
-          RELEASE_URL="$(gh release create "$TAG_NAME" "$ASSET_PATH" \
-            --title "$RELEASE_TITLE" \
-            --target "${{ github.sha }}" \
-            --latest \
-            --notes-file "$NOTES_FILE")"
-
-          echo "release_tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
-          echo "release_title=${RELEASE_TITLE}" >> "$GITHUB_OUTPUT"
-          echo "release_url=${RELEASE_URL}" >> "$GITHUB_OUTPUT"
-
-      - name: Report APK download result
+      - name: Write workflow summary
         if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          if [ "${{ steps.publish_release.outcome }}" = "success" ]; then
-            TAG_NAME="${{ steps.publish_release.outputs.release_tag }}"
-            if gh release view "$TAG_NAME" >/dev/null 2>&1; then
-              {
-                echo "## Pal Runner 3D — Android Debug APK Build"
-                echo ""
-                echo "- **Status:** Debug APK built and published to GitHub Releases"
-                echo "- **Release Title:** ${{ steps.publish_release.outputs.release_title }}"
-                echo "- **Release Tag:** \`${TAG_NAME}\`"
-                echo "- **APK Asset:** \`${{ steps.prepare_asset.outputs.asset_name }}\`"
-                echo "- **Release URL:** ${{ steps.publish_release.outputs.release_url }}"
-                echo "- **Workflow Artifact (backup):** \`app-debug-apk\`"
-              } >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "::warning::Release step succeeded but verification via gh release view failed."
-              {
-                echo "## Pal Runner 3D — Android Debug APK Build"
-                echo ""
-                echo "- **Status:** Debug APK artifact uploaded (\`app-debug-apk\`); release verification failed."
-                echo "- **Download Backup:** Download \`app-debug-apk\` from this workflow run's Artifacts section."
-              } >> "$GITHUB_STEP_SUMMARY"
-            fi
-          else
-            echo "::warning::GitHub Release publishing failed; the debug APK is still available as a workflow artifact."
+          if [ "${{ steps.keystore_check.outputs.configured }}" = "true" ]; then
             {
-              echo "## Pal Runner 3D — Android Debug APK Build"
+              echo "## Pal Runner 3D — Signed Release APK"
               echo ""
-              echo "- **Status:** Debug APK built and uploaded as workflow artifact only."
-              echo "- **Download Backup:** Download \`app-debug-apk\` from this workflow run's Artifacts section."
+              echo "- **Status:** Signed Release APK built, signature-verified, and published."
+              echo "- **Artifact:** \`app-release-apk\` (\`app-release.apk\`)"
+              echo "- **Package:** \`com.palrunner3d.app\` (version \`1.0.1\`, versionCode \`2\`)"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Pal Runner 3D — Release Signing Secrets Required"
+              echo ""
+              echo "A **debug APK** was built for internal testing only (do NOT submit debug APKs to Uptodown)."
+              echo ""
+              echo "To generate and publish the signed **Release APK** for Uptodown, configure these 4 GitHub Repository Secrets:"
+              echo "- \`ANDROID_KEYSTORE_BASE64\`"
+              echo "- \`ANDROID_KEYSTORE_PASSWORD\`"
+              echo "- \`ANDROID_KEY_ALIAS\`"
+              echo "- \`ANDROID_KEY_PASSWORD\`"
             } >> "$GITHUB_STEP_SUMMARY"
           fi

@@ -234,6 +234,21 @@ class SoundEngine {
       this.musicTimer = null;
     }
   }
+
+  suspendIfHidden(): void {
+    if (typeof document !== 'undefined' && document.hidden) {
+      this.stopMusic();
+      if (this.ctx && this.ctx.state === 'running') {
+        void this.ctx.suspend();
+      }
+    }
+  }
 }
 
 export const soundEngine = new SoundEngine();
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    soundEngine.suspendIfHidden();
+  });
+}

@@ -10,6 +10,7 @@ import {
   LogIn,
   RefreshCw,
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import type { User } from 'firebase/auth';
 import {
   acceptFriendRequest,
@@ -208,6 +209,16 @@ export function LeaderboardModal({ user, onClose, onSignIn }: LeaderboardModalPr
 
           {tab === 'global' ? (
             <LeaderboardTable rows={globalRows} currentUid={user?.uid} loading={loading} />
+          ) : !user && Capacitor.isNativePlatform() ? (
+            <div className="rounded-2xl bg-slate-950 border border-slate-800 p-6 text-center">
+              <Users className="h-9 w-9 text-cyan-400 mx-auto" />
+              <h3 className="font-display text-lg font-bold text-white mt-3">
+                Friends Leaderboard via Web Account
+              </h3>
+              <p className="text-sm text-slate-400 mt-1 max-w-md mx-auto">
+                Your scores are saved locally on Android and the Global Top 25 leaderboard updates live. Friend Codes and Google Cloud Sync are managed in the web version.
+              </p>
+            </div>
           ) : !user ? (
             <div className="rounded-2xl bg-slate-950 border border-slate-800 p-6 text-center">
               <Users className="h-9 w-9 text-cyan-400 mx-auto" />

@@ -18,12 +18,30 @@ android {
     }
     signingConfigs {
         release {
-            def ksPath = System.getenv("ANDROID_KEYSTORE_PATH") ?: project.findProperty("RELEASE_STORE_FILE")
+            def keystorePropertiesFile = rootProject.file("keystore.properties")
+            def keystoreProperties = new Properties()
+            if (keystorePropertiesFile.exists()) {
+                keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+            }
+            def ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+                ?: keystoreProperties.getProperty("storeFile")
+                ?: project.findProperty("RELEASE_STORE_FILE")
             if (ksPath) {
-                storeFile file(ksPath)
-                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: (project.findProperty("RELEASE_STORE_PASSWORD") ?: "")
-                keyAlias System.getenv("ANDROID_KEY_ALIAS") ?: (project.findProperty("RELEASE_KEY_ALIAS") ?: "")
-                keyPassword System.getenv("ANDROID_KEY_PASSWORD") ?: (project.findProperty("RELEASE_KEY_PASSWORD") ?: "")
+                def resolvedKsFile = new File(ksPath)
+                if (!resolvedKsFile.isAbsolute()) {
+                    def inRoot = rootProject.file(ksPath)
+                    resolvedKsFile = inRoot.exists() ? inRoot : file(ksPath)
+                }
+                storeFile resolvedKsFile
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                    ?: keystoreProperties.getProperty("storePassword")
+                    ?: (project.findProperty("RELEASE_STORE_PASSWORD") ?: "")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                    ?: keystoreProperties.getProperty("keyAlias")
+                    ?: (project.findProperty("RELEASE_KEY_ALIAS") ?: "")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+                    ?: keystoreProperties.getProperty("keyPassword")
+                    ?: (project.findProperty("RELEASE_KEY_PASSWORD") ?: "")
             }
         }
     }

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-release-apk:
-    name: Build Signed Release APK
+    name: Build Signed Release APK & AAB
     runs-on: ubuntu-latest
 
     steps:
@@ -58,7 +58,7 @@ jobs:
           set -euo pipefail
           if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASS" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASS" ]; then
             KEYSTORE_FILE="${RUNNER_TEMP}/palrunner-release.jks"
-            printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE_FILE"
+            printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 --decode > "$KEYSTORE_FILE"
             if [ ! -s "$KEYSTORE_FILE" ]; then
               echo "::error::Decoded release keystore file is empty."
               exit 1
@@ -66,11 +66,11 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
             echo "keystore_path=${KEYSTORE_FILE}" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Release signing secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) are not set. Skipping signed release APK; building internal test debug APK only."
+            echo "::warning::Release signing secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) are not set. Skipping signed release build; building internal test debug APK only."
             echo "configured=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build signed Release APK
+      - name: Build signed Release APK & AAB
         if: steps.keystore_check.outputs.configured == 'true'
         working-directory: android
         env:
@@ -78,15 +78,21 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle :app:assembleRelease --stacktrace --no-daemon
+        run: gradle :app:assembleRelease :app:bundleRelease --stacktrace --no-daemon
 
-      - name: Verify Release APK signature & manifest
+      - name: Verify Release APK & AAB signatures
         if: steps.keystore_check.outputs.configured == 'true'
         run: |
           set -euo pipefail
           APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+          AAB_PATH="android/app/build/outputs/bundle/release/app-release.aab"
+
           if [ ! -f "$APK_PATH" ] || [ ! -s "$APK_PATH" ]; then
             echo "::error::Signed release APK missing at $APK_PATH"
+            exit 1
+          fi
+          if [ ! -f "$AAB_PATH" ] || [ ! -s "$AAB_PATH" ]; then
+            echo "::error::Signed release AAB missing at $AAB_PATH"
             exit 1
           fi
 
@@ -106,7 +112,10 @@ jobs:
             fi
           fi
 
+          "${JAVA_HOME}/bin/jarsigner" -verify -verbose -certs "$AAB_PATH" | tail -n 10
+
           echo "Verified signed release APK: $APK_PATH ($(wc -c < "$APK_PATH") bytes)"
+          echo "Verified signed release AAB: $AAB_PATH ($(wc -c < "$AAB_PATH") bytes)"
 
       - name: Upload signed Release APK artifact
         if: steps.keystore_check.outputs.configured == 'true'
@@ -116,29 +125,40 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
-      - name: Stage & publish signed Release APK to GitHub Releases
+      - name: Upload signed Release AAB artifact
+        if: steps.keystore_check.outputs.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
+      - name: Stage & publish signed Release APK & AAB to GitHub Releases
         if: steps.keystore_check.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           APK_SOURCE="android/app/build/outputs/apk/release/app-release.apk"
-          ASSET_PATH="${RUNNER_TEMP}/pal-runner-3d-v1.0.1-release-${{ github.run_number }}.apk"
-          cp "$APK_SOURCE" "$ASSET_PATH"
+          AAB_SOURCE="android/app/build/outputs/bundle/release/app-release.aab"
+          APK_ASSET="${RUNNER_TEMP}/pal-runner-3d-v1.0.1-release-${{ github.run_number }}.apk"
+          AAB_ASSET="${RUNNER_TEMP}/pal-runner-3d-v1.0.1-release-${{ github.run_number }}.aab"
+          cp "$APK_SOURCE" "$APK_ASSET"
+          cp "$AAB_SOURCE" "$AAB_ASSET"
 
-          TAG_NAME="release-v1.0.1-build-${{ github.run_number }}"
+          TAG_NAME="release-v1.0.1-build-${{ github.run_number }}-${{ github.run_attempt }}"
           RELEASE_TITLE="Pal Runner 3D v1.0.1 (Release Build #${{ github.run_number }})"
           NOTES_FILE="${RUNNER_TEMP}/release-notes.md"
-          cat <<EOF > "$NOTES_FILE"
-          Signed **Release APK** built via GitHub Actions.
+          cat <<'EOF' | sed "s/^          //; s/__SHA__/${{ github.sha }}/" > "$NOTES_FILE"
+          Signed **Release APK** (for Uptodown & direct markets) and **Release AAB** (for Google Play Store) built via GitHub Actions.
 
-          - **App:** Pal Runner 3D (\`com.palrunner3d.app\`)
-          - **Version:** \`1.0.1\` (\`versionCode 2\`)
-          - **Commit:** \`${{ github.sha }}\`
-          - **Verified:** Signed with repository release keystore, \`application-debuggable\` absent.
+          - **App:** Pal Runner 3D (`com.palrunner3d.app`)
+          - **Version:** `1.0.1` (`versionCode 2`)
+          - **Commit:** `__SHA__`
+          - **Verified:** Signed with repository release keystore (`apksigner` & `jarsigner`), `application-debuggable` absent.
           EOF
 
-          gh release create "$TAG_NAME" "$ASSET_PATH" \
+          gh release create "$TAG_NAME" "$APK_ASSET" "$AAB_ASSET" \
             --title "$RELEASE_TITLE" \
             --target "${{ github.sha }}" \
             --latest \
@@ -175,19 +195,20 @@ jobs:
         run: |
           if [ "${{ steps.keystore_check.outputs.configured }}" = "true" ]; then
             {
-              echo "## Pal Runner 3D — Signed Release APK"
+              echo "## Pal Runner 3D — Signed Release APK & AAB"
               echo ""
-              echo "- **Status:** Signed Release APK built, signature-verified, and published."
-              echo "- **Artifact:** \`app-release-apk\` (\`app-release.apk\`)"
+              echo "- **Status:** Signed Release APK & AAB built, signature-verified, and published."
+              echo "- **APK Artifact (Uptodown / Markets):** \`app-release-apk\` (\`app-release.apk\`)"
+              echo "- **AAB Artifact (Google Play):** \`app-release-aab\` (\`app-release.aab\`)"
               echo "- **Package:** \`com.palrunner3d.app\` (version \`1.0.1\`, versionCode \`2\`)"
             } >> "$GITHUB_STEP_SUMMARY"
           else
             {
               echo "## Pal Runner 3D — Release Signing Secrets Required"
               echo ""
-              echo "A **debug APK** was built for internal testing only (do NOT submit debug APKs to Uptodown)."
+              echo "A **debug APK** was built for internal testing only (do NOT submit debug APKs to markets)."
               echo ""
-              echo "To generate and publish the signed **Release APK** for Uptodown, configure these 4 GitHub Repository Secrets:"
+              echo "To generate and publish the signed **Release APK & AAB**, configure these 4 GitHub Repository Secrets:"
               echo "- \`ANDROID_KEYSTORE_BASE64\`"
               echo "- \`ANDROID_KEYSTORE_PASSWORD\`"
               echo "- \`ANDROID_KEY_ALIAS\`"

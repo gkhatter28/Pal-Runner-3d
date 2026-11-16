@@ -7,7 +7,9 @@ import { soundEngine } from './audio/soundEngine';
 import {
   hideBannerAd,
   initializeAdMob,
+  preloadInterstitialAd,
   showBannerAd,
+  showInterstitialAd,
   showNativeAdMobAd,
   syncAdMobAudio,
 } from './services/admob';
@@ -127,9 +129,12 @@ export default function App() {
   // Auth subscription & automatic cloud merge
   useEffect(() => {
     soundEngine.setPreferences(saveRef.current.audioSfx, saveRef.current.audioMusic);
-    void initializeAdMob().then(() =>
-      syncAdMobAudio(saveRef.current.audioSfx, saveRef.current.audioMusic),
-    );
+    void initializeAdMob().then(() => {
+      void syncAdMobAudio(saveRef.current.audioSfx, saveRef.current.audioMusic);
+      if (!saveRef.current.adFree) {
+        void preloadInterstitialAd(saveRef.current.personalizedAds);
+      }
+    });
 
     const unsub = subscribeToAuth(async (nextUser) => {
       setUser(nextUser);
@@ -236,21 +241,56 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeModal]);
 
+  const maybeShowPostRunInterstitial = useCallback(async () => {
+    const s = saveRef.current;
+    if (
+      !Capacitor.isNativePlatform() ||
+      s.adFree ||
+      phaseRef.current !== 'crashed' ||
+      revivedRef.current ||
+      s.totalRuns < 2 ||
+      s.totalRuns % 2 !== 0 ||
+      adBusyRef.current
+    ) {
+      return;
+    }
+    adBusyRef.current = true;
+    try {
+      await showInterstitialAd(s.personalizedAds);
+    } finally {
+      adBusyRef.current = false;
+    }
+  }, []);
+
   const handleStartRun = useCallback(() => {
     soundEngine.playUiClick();
-    setActiveModal('none');
-    setRunSummary(null);
-    setRevivedThisRun(false);
-    setPhase('playing');
-    const s = saveRef.current;
-    engineRef.current?.startNewRun({
-      magnetLevel: s.magnetLevel,
-      jetpackLevel: s.jetpackLevel,
-      multiplierLevel: s.multiplierLevel,
-      hoverboards: s.hoverboards,
-      qualityPreset: s.qualityPreset,
-    });
-  }, []);
+    if (adBusyRef.current) return;
+
+    const launchRun = () => {
+      setActiveModal('none');
+      setRunSummary(null);
+      setRevivedThisRun(false);
+      setPhase('playing');
+      const s = saveRef.current;
+      engineRef.current?.startNewRun({
+        magnetLevel: s.magnetLevel,
+        jetpackLevel: s.jetpackLevel,
+        multiplierLevel: s.multiplierLevel,
+        hoverboards: s.hoverboards,
+        qualityPreset: s.qualityPreset,
+      });
+      if (!s.adFree) {
+        void preloadInterstitialAd(s.personalizedAds);
+      }
+    };
+
+    if (phaseRef.current === 'crashed') {
+      void maybeShowPostRunInterstitial().finally(launchRun);
+      return;
+    }
+
+    launchRun();
+  }, [maybeShowPostRunInterstitial]);
 
   const handlePause = () => {
     soundEngine.playUiClick();
@@ -266,9 +306,20 @@ export default function App() {
 
   const handleReturnHome = () => {
     soundEngine.playUiClick();
-    setRunSummary(null);
-    engineRef.current?.setPhase('menu');
-    setPhase('menu');
+    if (adBusyRef.current) return;
+
+    const goHome = () => {
+      setRunSummary(null);
+      engineRef.current?.setPhase('menu');
+      setPhase('menu');
+    };
+
+    if (phaseRef.current === 'crashed') {
+      void maybeShowPostRunInterstitial().finally(goHome);
+      return;
+    }
+
+    goHome();
   };
 
   const handleActivateHoverboard = () => {

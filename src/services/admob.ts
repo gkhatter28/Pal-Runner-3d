@@ -8,6 +8,7 @@ import {
 
 export const ADMOB_APP_ID = 'ca-app-pub-6043186517327565~7998012030';
 export const ADMOB_AD_UNIT_ID = 'ca-app-pub-6043186517327565/1069466598';
+export const ADMOB_INTERSTITIAL_AD_UNIT_ID = 'ca-app-pub-6043186517327565/6097541341';
 export const UNITY_GAME_ID = '800438823';
 export const UNITY_AD_PLACEMENT_ID = 'BP_Banner_Android';
 export const UNITY_AD_UNIT_ID = '54fa67b9-1b1d-4c17-80cf-d6dd88292b3d';
@@ -32,6 +33,9 @@ const UnityAdsBanner = registerPlugin<UnityAdsBannerPluginInterface>('UnityAdsBa
 let initialized = false;
 let initPromise: Promise<void> | null = null;
 let bannerActive = false;
+let interstitialPrepared = false;
+let interstitialLoading = false;
+let interstitialShowing = false;
 
 export async function initializeAdMob(): Promise<void> {
   if (!Capacitor.isNativePlatform() || initialized) return;
@@ -106,6 +110,58 @@ export async function hideBannerAd(): Promise<void> {
   await Promise.allSettled([UnityAdsBanner.hideBanner(), AdMob.removeBanner()]);
 }
 
+export async function preloadInterstitialAd(personalizedAds: boolean): Promise<void> {
+  if (!Capacitor.isNativePlatform() || interstitialPrepared || interstitialLoading) return;
+
+  await initializeAdMob();
+  if (!initialized) return;
+
+  interstitialLoading = true;
+  try {
+    await AdMob.prepareInterstitial({
+      adId: ADMOB_INTERSTITIAL_AD_UNIT_ID,
+      npa: !personalizedAds,
+      immersiveMode: true,
+    });
+    interstitialPrepared = true;
+  } catch {
+    interstitialPrepared = false;
+  } finally {
+    interstitialLoading = false;
+  }
+}
+
+export async function showInterstitialAd(personalizedAds: boolean): Promise<boolean> {
+  if (!Capacitor.isNativePlatform() || interstitialShowing) {
+    return false;
+  }
+
+  await initializeAdMob();
+  if (!initialized) {
+    return false;
+  }
+
+  interstitialShowing = true;
+  try {
+    if (!interstitialPrepared) {
+      await AdMob.prepareInterstitial({
+        adId: ADMOB_INTERSTITIAL_AD_UNIT_ID,
+        npa: !personalizedAds,
+        immersiveMode: true,
+      });
+    }
+    interstitialPrepared = false;
+    await AdMob.showInterstitial({ adId: ADMOB_INTERSTITIAL_AD_UNIT_ID });
+    void preloadInterstitialAd(personalizedAds);
+    return true;
+  } catch {
+    interstitialPrepared = false;
+    return false;
+  } finally {
+    interstitialShowing = false;
+  }
+}
+
 export type NativeAdOutcome = 'rewarded' | 'dismissed' | 'unavailable';
 
 export async function showNativeAdMobAd(personalizedAds: boolean): Promise<NativeAdOutcome> {
@@ -118,15 +174,13 @@ export async function showNativeAdMobAd(personalizedAds: boolean): Promise<Nativ
     return 'unavailable';
   }
 
-  const options = {
-    adId: ADMOB_AD_UNIT_ID,
-    npa: !personalizedAds,
-    immersiveMode: true,
-  };
-
   // 1. Try Rewarded Video Ad unit first
   try {
-    await AdMob.prepareRewardVideoAd(options);
+    await AdMob.prepareRewardVideoAd({
+      adId: ADMOB_AD_UNIT_ID,
+      npa: !personalizedAds,
+      immersiveMode: true,
+    });
     const reward = await AdMob.showRewardVideoAd();
     return reward && typeof reward.amount === 'number' ? 'rewarded' : 'dismissed';
   } catch (rewardErr) {
@@ -142,10 +196,14 @@ export async function showNativeAdMobAd(personalizedAds: boolean): Promise<Nativ
     }
   }
 
-  // 2. Fallback if the configured unit ID is an Interstitial unit
+  // 2. Fallback to dedicated Interstitial Ad unit
   try {
-    await AdMob.prepareInterstitial(options);
-    await AdMob.showInterstitial();
+    await AdMob.prepareInterstitial({
+      adId: ADMOB_INTERSTITIAL_AD_UNIT_ID,
+      npa: !personalizedAds,
+      immersiveMode: true,
+    });
+    await AdMob.showInterstitial({ adId: ADMOB_INTERSTITIAL_AD_UNIT_ID });
     return 'rewarded';
   } catch {
     return 'unavailable';

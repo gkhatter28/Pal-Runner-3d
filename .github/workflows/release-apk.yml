@@ -8,6 +8,7 @@ permissions:
 
 jobs:
   build:
+    name: Build Signed Production APK & Play Store AAB
     runs-on: ubuntu-latest
 
     steps:
@@ -17,16 +18,34 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '22'
 
-      - name: Setup Java
+      - name: Setup Java 21 (Required by Capacitor 8 & AGP 8.13)
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: 17
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Verify Java Version
+        run: |
+          java -version
+          javac -version
+          echo "JAVA_HOME=${JAVA_HOME}"
+
+      - name: Setup Gradle 8.14.3
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+
+      - name: Ensure Android SDK Licenses
+        run: |
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ -d "$SDK_DIR" ] && [ -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_DIR" --licenses >/dev/null 2>&1 || true
+          fi
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
 
       - name: Build Game
         run: npm run build
@@ -34,29 +53,110 @@ jobs:
       - name: Sync Android
         run: npx cap sync android
 
-      - name: Build Release APK
+      - name: Validate & Decode Release Keystore Secrets
+        id: keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 || secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS_VAL: ${{ secrets.KEY_ALIAS || secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD || secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleRelease
+          set -euo pipefail
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASS" ] || [ -z "$KEY_ALIAS_VAL" ] || [ -z "$KEY_PASS" ]; then
+            echo "::error::Missing required release signing secrets. Configure KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD (or ANDROID_KEYSTORE_* equivalents) in GitHub Repository Secrets."
+            exit 1
+          fi
 
-      - name: Sign Release APK
-        id: sign_app
-        uses: r0adkll/sign-android-release@v1
+          KEYSTORE_FILE="${RUNNER_TEMP}/palrunner-release.jks"
+          printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 --decode > "$KEYSTORE_FILE"
+          if [ ! -s "$KEYSTORE_FILE" ]; then
+            echo "::error::Decoded keystore file is empty. Verify KEYSTORE_BASE64 contains valid base64."
+            exit 1
+          fi
+
+          # Verify keystore password & alias before Gradle build
+          "${JAVA_HOME}/bin/keytool" -list \
+            -keystore "$KEYSTORE_FILE" \
+            -storepass "$KEYSTORE_PASS" \
+            -alias "$KEY_ALIAS_VAL" >/dev/null
+
+          echo "keystore_path=${KEYSTORE_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Signed Release APK & Play Store AAB
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ steps.keystore.outputs.keystore_path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS || secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle :app:assembleRelease :app:bundleRelease --stacktrace --no-daemon
+
+      - name: Verify Signed APK & AAB Integrity
+        run: |
+          set -euo pipefail
+          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+          AAB_PATH="android/app/build/outputs/bundle/release/app-release.aab"
+
+          if [ ! -f "$APK_PATH" ] || [ ! -s "$APK_PATH" ]; then
+            echo "::error::Signed Release APK missing at $APK_PATH"
+            exit 1
+          fi
+          if [ ! -f "$AAB_PATH" ] || [ ! -s "$AAB_PATH" ]; then
+            echo "::error::Signed Release AAB missing at $AAB_PATH"
+            exit 1
+          fi
+
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          BUILD_TOOLS_DIR="$(find "$SDK_DIR/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+
+          if [ -x "$BUILD_TOOLS_DIR/apksigner" ]; then
+            "$BUILD_TOOLS_DIR/apksigner" verify --verbose --print-certs "$APK_PATH"
+          fi
+
+          if [ -x "$BUILD_TOOLS_DIR/aapt2" ]; then
+            BADGING="$("$BUILD_TOOLS_DIR/aapt2" dump badging "$APK_PATH")"
+            printf '%s\n' "$BADGING" | head -n 5
+            if printf '%s\n' "$BADGING" | grep -q "application-debuggable"; then
+              echo "::error::Release APK must NOT be marked application-debuggable!"
+              exit 1
+            fi
+          fi
+
+          AAB_VERIFY="$("${JAVA_HOME}/bin/jarsigner" -verify -certs "$AAB_PATH")"
+          echo "$AAB_VERIFY"
+          if ! printf '%s\n' "$AAB_VERIFY" | grep -q "jar verified"; then
+            echo "::error::AAB signature verification failed! Output did not confirm 'jar verified'."
+            exit 1
+          fi
+
+      - name: Prepare Production Release Files
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk pal-runner-3d-v1.0.1-release.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab pal-runner-3d-v1.0.1-playstore.aab
+
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
         with:
-          releaseDirectory: android/app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
-          alias: ${{ secrets.KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
+          name: pal-runner-3d-release-apk
+          path: pal-runner-3d-v1.0.1-release.apk
+          if-no-files-found: error
 
-      - name: Rename APK
-        run: |
-          cp "${{ steps.sign_app.outputs.signedReleaseFile }}" pal-runner-3d-release.apk
+      - name: Upload Play Store AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pal-runner-3d-playstore-aab
+          path: pal-runner-3d-v1.0.1-playstore.aab
+          if-no-files-found: error
 
-      - name: Publish Release
+      - name: Publish Production Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Pal Runner 3D Production Release
-          files: pal-runner-3d-release.apk
+          tag_name: v1.0.1-prod-${{ github.run_number }}-${{ github.run_attempt }}
+          name: Pal Runner 3D v1.0.1 Production Release
+          body: |
+            Signed production binaries for **Pal Runner 3D** (`com.palrunner3d.app`, `versionCode 2`, `versionName 1.0.1`):
+            - `pal-runner-3d-v1.0.1-playstore.aab` — Google Play Store Android App Bundle
+            - `pal-runner-3d-v1.0.1-release.apk` — Signed Release APK (Uptodown, Galaxy Store, direct distribution)
+          files: |
+            pal-runner-3d-v1.0.1-release.apk
+            pal-runner-3d-v1.0.1-playstore.aab

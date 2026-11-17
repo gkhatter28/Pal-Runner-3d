@@ -110,8 +110,58 @@ jobs:
             exit 1
           fi
 
-          echo "Keystore decoded and verified successfully."
+          # Step 3: Verify private key password (handles Java 21 PKCS12 keystores where keypass == storepass)
+          RESOLVED_KEY_PASS="$KEY_PASS"
+          PROBE_P12="${RUNNER_TEMP}/probe-key.p12"
+          rm -f "$PROBE_P12"
+          set +e
+          KEY_TEST_OUT="$("${JAVA_HOME}/bin/keytool" -importkeystore \
+            -srckeystore "$KEYSTORE_FILE" \
+            -srcstorepass "$KEYSTORE_PASS" \
+            -srcalias "$KEY_ALIAS_VAL" \
+            -srckeypass "$KEY_PASS" \
+            -destkeystore "$PROBE_P12" \
+            -deststoretype PKCS12 \
+            -deststorepass "$KEYSTORE_PASS" \
+            -destkeypass "$KEYSTORE_PASS" 2>&1)"
+          KEY_TEST_EXIT=$?
+          set -e
+          rm -f "$PROBE_P12"
+
+          if [ "$KEY_TEST_EXIT" -ne 0 ]; then
+            if [ "$KEY_PASS" != "$KEYSTORE_PASS" ]; then
+              set +e
+              FALLBACK_OUT="$("${JAVA_HOME}/bin/keytool" -importkeystore \
+                -srckeystore "$KEYSTORE_FILE" \
+                -srcstorepass "$KEYSTORE_PASS" \
+                -srcalias "$KEY_ALIAS_VAL" \
+                -srckeypass "$KEYSTORE_PASS" \
+                -destkeystore "$PROBE_P12" \
+                -deststoretype PKCS12 \
+                -deststorepass "$KEYSTORE_PASS" \
+                -destkeypass "$KEYSTORE_PASS" 2>&1)"
+              FALLBACK_EXIT=$?
+              set -e
+              rm -f "$PROBE_P12"
+              if [ "$FALLBACK_EXIT" -eq 0 ]; then
+                echo "::warning::KEY_PASSWORD did not match private key, but KEYSTORE_PASSWORD unlocked it (typical for Java 21 PKCS12 keystores). Proceeding with KEYSTORE_PASSWORD for signing; update KEY_PASSWORD secret to match KEYSTORE_PASSWORD."
+                RESOLVED_KEY_PASS="$KEYSTORE_PASS"
+              else
+                echo "::error::Neither KEY_PASSWORD nor KEYSTORE_PASSWORD could unlock alias '$KEY_ALIAS_VAL'."
+                echo "$KEY_TEST_OUT"
+                exit 1
+              fi
+            else
+              echo "::error::KEY_PASSWORD could not unlock alias '$KEY_ALIAS_VAL'."
+              echo "$KEY_TEST_OUT"
+              exit 1
+            fi
+          fi
+
+          echo "::add-mask::$RESOLVED_KEY_PASS"
+          echo "Keystore, alias, and key password verified successfully."
           echo "keystore_path=${KEYSTORE_FILE}" >> "$GITHUB_OUTPUT"
+          echo "resolved_key_pass=${RESOLVED_KEY_PASS}" >> "$GITHUB_OUTPUT"
 
       - name: Build Signed Release APK & Play Store AAB
         working-directory: android
@@ -119,8 +169,8 @@ jobs:
           ANDROID_KEYSTORE_PATH: ${{ steps.keystore.outputs.keystore_path }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS || secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle :app:assembleRelease :app:bundleRelease --stacktrace --no-daemon
+          ANDROID_KEY_PASSWORD: ${{ steps.keystore.outputs.resolved_key_pass }}
+        run: gradle :app:assembleRelease :app:bundleRelease --stacktrace --no-daemon --console=plain
 
       - name: Verify Signed APK & AAB Integrity
         run: |
@@ -138,13 +188,16 @@ jobs:
           fi
 
           SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          BUILD_TOOLS_DIR="$(find "$SDK_DIR/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          BUILD_TOOLS_DIR=""
+          if [ -d "$SDK_DIR/build-tools" ]; then
+            BUILD_TOOLS_DIR="$(find "$SDK_DIR/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1 || true)"
+          fi
 
-          if [ -x "$BUILD_TOOLS_DIR/apksigner" ]; then
+          if [ -n "$BUILD_TOOLS_DIR" ] && [ -x "$BUILD_TOOLS_DIR/apksigner" ]; then
             "$BUILD_TOOLS_DIR/apksigner" verify --verbose --print-certs "$APK_PATH"
           fi
 
-          if [ -x "$BUILD_TOOLS_DIR/aapt2" ]; then
+          if [ -n "$BUILD_TOOLS_DIR" ] && [ -x "$BUILD_TOOLS_DIR/aapt2" ]; then
             BADGING="$("$BUILD_TOOLS_DIR/aapt2" dump badging "$APK_PATH")"
             printf '%s\n' "$BADGING" | head -n 5
             if printf '%s\n' "$BADGING" | grep -q "application-debuggable"; then
@@ -153,7 +206,9 @@ jobs:
             fi
           fi
 
-          AAB_VERIFY="$("${JAVA_HOME}/bin/jarsigner" -verify -certs "$AAB_PATH")"
+          set +e
+          AAB_VERIFY="$("${JAVA_HOME}/bin/jarsigner" -verify -certs "$AAB_PATH" 2>&1)"
+          set -e
           echo "$AAB_VERIFY"
           if ! printf '%s\n' "$AAB_VERIFY" | grep -q "jar verified"; then
             echo "::error::AAB signature verification failed! Output did not confirm 'jar verified'."
@@ -180,9 +235,12 @@ jobs:
           if-no-files-found: error
 
       - name: Publish Production Release
+        id: publish_release
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.1-prod-${{ github.run_number }}-${{ github.run_attempt }}
+          target_commitish: ${{ github.sha }}
           name: Pal Runner 3D v1.0.1 Production Release
           body: |
             Signed production binaries for **Pal Runner 3D** (`com.palrunner3d.app`, `versionCode 2`, `versionName 1.0.1`):
@@ -191,3 +249,14 @@ jobs:
           files: |
             pal-runner-3d-v1.0.1-release.apk
             pal-runner-3d-v1.0.1-playstore.aab
+
+      - name: Production Release Summary
+        if: always()
+        run: |
+          {
+            echo "## Pal Runner 3D v1.0.1 — Production Release"
+            echo ""
+            echo "- **Signed Release APK Artifact:** \`pal-runner-3d-release-apk\` (\`pal-runner-3d-v1.0.1-release.apk\`)"
+            echo "- **Signed Play Store AAB Artifact:** \`pal-runner-3d-playstore-aab\` (\`pal-runner-3d-v1.0.1-playstore.aab\`)"
+            echo "- **GitHub Release Publish:** ${{ steps.publish_release.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"

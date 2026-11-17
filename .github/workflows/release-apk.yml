@@ -62,24 +62,55 @@ jobs:
           KEY_PASS: ${{ secrets.KEY_PASSWORD || secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASS" ] || [ -z "$KEY_ALIAS_VAL" ] || [ -z "$KEY_PASS" ]; then
-            echo "::error::Missing required release signing secrets. Configure KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD (or ANDROID_KEYSTORE_* equivalents) in GitHub Repository Secrets."
+          MISSING=""
+          [ -z "$KEYSTORE_B64" ] && MISSING="$MISSING KEYSTORE_BASE64"
+          [ -z "$KEYSTORE_PASS" ] && MISSING="$MISSING KEYSTORE_PASSWORD"
+          [ -z "$KEY_ALIAS_VAL" ] && MISSING="$MISSING KEY_ALIAS"
+          [ -z "$KEY_PASS" ] && MISSING="$MISSING KEY_PASSWORD"
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing required GitHub Repository Secrets:$MISSING (or ANDROID_KEYSTORE_* equivalents)."
             exit 1
           fi
 
           KEYSTORE_FILE="${RUNNER_TEMP}/palrunner-release.jks"
-          printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 --decode > "$KEYSTORE_FILE"
-          if [ ! -s "$KEYSTORE_FILE" ]; then
-            echo "::error::Decoded keystore file is empty. Verify KEYSTORE_BASE64 contains valid base64."
+          # Strip certutil BEGIN/END headers, quotes, and all whitespace before base64 decoding
+          CLEAN_B64="$(printf '%s' "$KEYSTORE_B64" | tr -d "\r\"'" | sed -E '/^[[:space:]]*-----BEGIN/d; /^[[:space:]]*-----END/d' | tr -d '[:space:]')"
+          if ! printf '%s' "$CLEAN_B64" | base64 --decode > "$KEYSTORE_FILE" 2>/dev/null; then
+            echo "::error::KEYSTORE_BASE64 is not valid base64. Re-encode your .jks/.keystore file with: base64 -w 0 palrunner-release.jks"
             exit 1
           fi
 
-          # Verify keystore password & alias before Gradle build
-          "${JAVA_HOME}/bin/keytool" -list \
-            -keystore "$KEYSTORE_FILE" \
-            -storepass "$KEYSTORE_PASS" \
-            -alias "$KEY_ALIAS_VAL" >/dev/null
+          if [ ! -s "$KEYSTORE_FILE" ]; then
+            echo "::error::Decoded keystore file is empty. Verify KEYSTORE_BASE64."
+            exit 1
+          fi
 
+          # Step 1: Verify keystore format and store password
+          set +e
+          LIST_OUT="$("${JAVA_HOME}/bin/keytool" -list -keystore "$KEYSTORE_FILE" -storepass "$KEYSTORE_PASS" 2>&1)"
+          LIST_EXIT=$?
+          set -e
+          if [ "$LIST_EXIT" -ne 0 ]; then
+            echo "::error::Keystore unreadable or KEYSTORE_PASSWORD is incorrect."
+            echo "$LIST_OUT"
+            exit 1
+          fi
+
+          # Step 2: Verify KEY_ALIAS exists inside the keystore
+          set +e
+          ALIAS_OUT="$("${JAVA_HOME}/bin/keytool" -list -keystore "$KEYSTORE_FILE" -storepass "$KEYSTORE_PASS" -alias "$KEY_ALIAS_VAL" 2>&1)"
+          ALIAS_EXIT=$?
+          set -e
+          if [ "$ALIAS_EXIT" -ne 0 ]; then
+            echo "::error::KEY_ALIAS does not match any entry in the keystore."
+            echo "$ALIAS_OUT"
+            echo "Aliases present in keystore:"
+            printf '%s\n' "$LIST_OUT" | grep -E "PrivateKeyEntry|SecretKeyEntry" || true
+            exit 1
+          fi
+
+          echo "Keystore decoded and verified successfully."
           echo "keystore_path=${KEYSTORE_FILE}" >> "$GITHUB_OUTPUT"
 
       - name: Build Signed Release APK & Play Store AAB

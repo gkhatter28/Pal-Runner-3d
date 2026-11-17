@@ -63,15 +63,34 @@ jobs:
           set -euo pipefail
           if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASS" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASS" ]; then
             KEYSTORE_FILE="${RUNNER_TEMP}/palrunner-release.jks"
-            printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 --decode > "$KEYSTORE_FILE"
-            if [ ! -s "$KEYSTORE_FILE" ]; then
-              echo "::error::Decoded release keystore file is empty."
+            CLEAN_B64="$(printf '%s' "$KEYSTORE_B64" | tr -d "\r\"'" | sed -E '/^[[:space:]]*-----BEGIN/d; /^[[:space:]]*-----END/d' | tr -d '[:space:]')"
+            if ! printf '%s' "$CLEAN_B64" | base64 --decode > "$KEYSTORE_FILE" 2>/dev/null || [ ! -s "$KEYSTORE_FILE" ]; then
+              echo "::error::Decoded release keystore is invalid or empty. Verify ANDROID_KEYSTORE_BASE64 / KEYSTORE_BASE64."
+              exit 1
+            fi
+            set +e
+            LIST_OUT="$("${JAVA_HOME}/bin/keytool" -list -keystore "$KEYSTORE_FILE" -storepass "$KEYSTORE_PASS" 2>&1)"
+            LIST_EXIT=$?
+            set -e
+            if [ "$LIST_EXIT" -ne 0 ]; then
+              echo "::error::Keystore unreadable or store password is incorrect."
+              echo "$LIST_OUT"
+              exit 1
+            fi
+            set +e
+            ALIAS_OUT="$("${JAVA_HOME}/bin/keytool" -list -keystore "$KEYSTORE_FILE" -storepass "$KEYSTORE_PASS" -alias "$KEY_ALIAS" 2>&1)"
+            ALIAS_EXIT=$?
+            set -e
+            if [ "$ALIAS_EXIT" -ne 0 ]; then
+              echo "::error::Key alias not found in keystore."
+              echo "$ALIAS_OUT"
+              printf '%s\n' "$LIST_OUT" | grep -E "PrivateKeyEntry|SecretKeyEntry" || true
               exit 1
             fi
             echo "configured=true" >> "$GITHUB_OUTPUT"
             echo "keystore_path=${KEYSTORE_FILE}" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Release signing secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD) are not set. Skipping signed release build; building internal test debug APK only."
+            echo "::warning::Release signing secrets (ANDROID_KEYSTORE_BASE64/KEYSTORE_BASE64, PASSWORD, ALIAS, KEY_PASSWORD) are not all set. Skipping signed release build; building internal test debug APK only."
             echo "configured=false" >> "$GITHUB_OUTPUT"
           fi
 

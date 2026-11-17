@@ -101,7 +101,7 @@ export const RUNNER_SKINS: RunnerSkin[] = [
 ];
 
 export const PRIVACY_POLICY_URL =
-  'https://ais-pre-dg6g25albs3wdll5nhiqt7-418457078286.asia-northeast1.run.app/privacy-policy.html';
+  'https://sites.google.com/view/pal-runner-3d-privacy-policy/home';
 
 export interface IAPProduct {
   id: string;
